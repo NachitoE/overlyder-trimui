@@ -21,7 +21,7 @@ enum { IT_SLIDER = 0, IT_ACTION = 1, IT_TOGGLE = 2 };
 enum { ACT_NONE = 0, ACT_CLOSE, ACT_EXIT_GAME, ACT_REBOOT, ACT_POWEROFF };
 enum {
     I_VOL = 0, I_BRI, I_CON, I_EXP, I_SAT, I_TMP,
-    I_LEDBRI, I_MUTE, I_PLAY, I_EXIT, I_REBOOT, I_POWER
+    I_LEDBRI, I_LEDCOLOR, I_MUTE, I_PLAY, I_EXIT, I_REBOOT, I_POWER
 };
 
 /* Glyphs from the bundled Material Icons pack (Apache-2.0), by code point:
@@ -38,6 +38,7 @@ enum {
 #define GL_REBOOT  0xF053u
 #define GL_POWER   0xE8ACu
 #define GL_LED     0xEA24u  /* emoji_objects (lightbulb) */
+#define GL_COLOR   0xE0C3u  /* invert_colors */
 #define GL_MUTE    0xE04Fu  /* volume_off */
 #define GL_BATTERY 0xE1A4u  /* battery_full */
 
@@ -58,6 +59,7 @@ static item_t items[] = {
     { "Saturación",  IT_SLIDER, ACT_NONE,      5, 80, GL_SAT },
     { "Temperatura", IT_SLIDER, ACT_NONE,      5, 50, GL_TMP },
     { "LED brillo",  IT_SLIDER, ACT_NONE,     10, 40, GL_LED },
+    { "LED color",   IT_SLIDER, ACT_NONE,      5,  0, GL_COLOR },
     { "Silenciar",   IT_TOGGLE, ACT_NONE,      0,  0, GL_MUTE },
     { "Continuar",   IT_ACTION, ACT_CLOSE,     0,  0, GL_PLAY },
     { "Salir juego", IT_ACTION, ACT_EXIT_GAME, 0,  0, GL_EXIT },
@@ -85,6 +87,7 @@ static int g_dim = 55;
 static int g_debug = 0;
 static int g_busy = 0;
 static int g_keep_overlay = 0;
+static int g_led_color_changed = 0;
 static int g_mode_cfg = 0;
 static int g_closing = 0;
 static long g_anim_start = 0;
@@ -105,7 +108,7 @@ enum {
     CFG_ESTADO = 0, CFG_GATILLO,
     CFG_K1, CFG_K2, CFG_K3, CFG_K4,
     CFG_UMBRAL, CFG_CONFIRMAR, CFG_IDIOMA,
-    CFG_LEARN, CFG_RESET, CFG_ABOUT, CFG_LISTO, NCFG
+    CFG_LEARN, CFG_RESET, CFG_ABOUT, CFG_UPDATE, CFG_LISTO, NCFG
 };
 
 #define PRESET_CUSTOM 6
@@ -156,6 +159,18 @@ static int g_about = 0;
 
 static overlay_cfg g_cfg;
 
+/* Self-updater state (CrossMix config app only). */
+enum {
+    UPD_NONE = 0, UPD_CHECKING, UPD_UPTODATE, UPD_AVAILABLE, UPD_CONFIRM,
+    UPD_INSTALLING, UPD_INSTALLED, UPD_ERROR
+};
+static int g_upd_state = UPD_NONE;
+static char g_upd_latest[32] = "";
+
+static void update_compose(void);
+static void upd_check(void);
+static void upd_install(void);
+
 #define COL_TEXT_R   240
 #define COL_TEXT_G   242
 #define COL_TEXT_B   248
@@ -188,8 +203,12 @@ enum {
     S_PRESET_HOLD_HOME, S_PRESET_HOME_SELECT, S_PRESET_HOME_START, S_PRESET_L1R1,
     S_PRESET_HOLD_SELECT, S_PRESET_HOLD_START, S_PRESET_CUSTOM,
     S_CFG_FOOTER,
-    S_LED, S_LED_BRI, S_MUTE, S_ON, S_OFF,
-    S_LEARN, S_RESET, S_ABOUT, S_LEARN_TITLE, S_ABOUT_TEXT, S_ABOUT_HINT, S_COUNT
+    S_LED, S_LED_BRI, S_LED_COLOR, S_MUTE, S_ON, S_OFF,
+    S_LEARN, S_RESET, S_ABOUT, S_LEARN_TITLE, S_ABOUT_TEXT, S_ABOUT_HINT,
+    S_UPDATE, S_UPDATE_TITLE, S_UPDATE_LOCAL, S_UPDATE_LATEST,
+    S_UPDATE_CHECKING, S_UPDATE_UPTODATE, S_UPDATE_AVAILABLE, S_UPDATE_ERROR,
+    S_UPDATE_CONFIRM, S_UPDATE_INSTALLING, S_UPDATE_INSTALLED, S_UPDATE_BACK,
+    S_COUNT
 };
 
 static const char *const g_tr[NLANG][S_COUNT] = {
@@ -208,10 +227,14 @@ static const char *const g_tr[NLANG][S_COUNT] = {
         "Mantener Home", "Home + Select", "Home + Start", "L1 + R1",
         "Mantener Select", "Mantener Start", "Personalizado",
         "Arriba/Abajo o < >: Elegir    A: Cambiar    B: Salir (guardado automatico)",
-        "LED", "Brillo LED", "Silenciar", "Encendido", "Apagado",
+        "LED", "Brillo LED", "Color LED", "Silenciar", "Encendido", "Apagado",
         "Aprender", "Restablecer", "Acerca de",
         "Pulsa los botones (B: listo)", "OverLyder 2.0 - Material Icons (Apache 2.0)",
         "A/B: volver",
+        "Actualizar", "Actualizador", "Versión instalada", "Última versión",
+        "Consultando GitHub...", "Estás al día", "Hay una versión nueva",
+        "No se pudo consultar", "A: Instalar   B: Cancelar", "Instalando...",
+        "Instalado. Reinicia la app", "B: Volver",
     },
     { /* English */
         "SETTINGS", "HOME / B: close",
@@ -228,10 +251,14 @@ static const char *const g_tr[NLANG][S_COUNT] = {
         "Hold Home", "Home + Select", "Home + Start", "L1 + R1",
         "Hold Select", "Hold Start", "Custom",
         "Up/Down or < >: Select    A: Change    B: Exit (auto-saved)",
-        "LED", "LED brightness", "Mute", "On", "Off",
+        "LED", "LED brightness", "LED color", "Mute", "On", "Off",
         "Learn", "Reset", "About",
         "Press buttons (B: done)", "OverLyder 2.0 - Material Icons (Apache 2.0)",
         "A/B: back",
+        "Update", "Updater", "Installed version", "Latest version",
+        "Checking GitHub...", "You are up to date", "A new version is available",
+        "Could not check", "A: Install   B: Cancel", "Installing...",
+        "Installed. Restart the app", "B: Back",
     },
     { /* Portuguese */
         "AJUSTES", "HOME / B: fechar",
@@ -248,10 +275,14 @@ static const char *const g_tr[NLANG][S_COUNT] = {
         "Manter Home", "Home + Select", "Home + Start", "L1 + R1",
         "Manter Select", "Manter Start", "Personalizado",
         "Cima/Baixo ou < >: Escolher    A: Alterar    B: Sair (salvamento automático)",
-        "LED", "LED brilho", "Silenciar", "Ligado", "Desligado",
+        "LED", "LED brilho", "Cor do LED", "Silenciar", "Ligado", "Desligado",
         "Aprender", "Redefinir", "Sobre",
         "Pressione os botões (B: pronto)", "OverLyder 2.0 - Material Icons (Apache 2.0)",
         "A/B: voltar",
+        "Atualizar", "Atualizador", "Versão instalada", "Última versão",
+        "Consultando o GitHub...", "Você está em dia", "Há uma versão nova",
+        "Não foi possível verificar", "A: Instalar   B: Cancelar", "Instalando...",
+        "Instalado. Reinicie o app", "B: Voltar",
     },
 };
 
@@ -262,7 +293,7 @@ static void items_set_language(void)
 {
     static const int ids[NITEMS] = {
         S_VOL, S_BRI, S_CON, S_EXP, S_SAT, S_TMP,
-        S_LED_BRI, S_MUTE,
+        S_LED_BRI, S_LED_COLOR, S_MUTE,
         S_PLAY, S_EXIT, S_REBOOT, S_POWER
     };
     for (int i = 0; i < NITEMS; i++)
@@ -666,7 +697,6 @@ static void audio_digital_set(int v)
 
 /* Stick LEDs: CrossMix stores ledswitch/ledvalue in system.json and shmvar,
  * but the driver only reacts to direct writes to /sys/class/led_anim. */
-#define LED_SYS "/sys/class/led_anim/"
 static void led_apply(int on, int level)
 {
     write_int_file(LED_SYS "effect_enable", on ? 1 : 0);
@@ -675,6 +705,51 @@ static void led_apply(int on, int level)
     sval_set("ledvalue", level);
     shm_set(8, on ? 1 : 0);
     shm_set(10, level);
+}
+
+/* The color slider is language-neutral: 0 = white (firmware default),
+ * 1..99 = a hue around the color wheel, 100 = LEDs off. HSV with full
+ * saturation and value gives the brightest possible color for each hue. */
+static uint32_t led_value_to_rgb(int v)
+{
+    if (v <= 0)
+        return 0xFFFFFF;
+    if (v >= 100)
+        return 0x000000;
+
+    float h = (float)(v - 1) * 360.0f / 98.0f;
+    float c = 1.0f;
+    float x = c * (1.0f - fabsf(fmodf(h / 60.0f, 2.0f) - 1.0f));
+    float r = 0, g = 0, b = 0;
+    if (h < 60)        { r = c; g = x; }
+    else if (h < 120)  { r = x; g = c; }
+    else if (h < 180)  { g = c; b = x; }
+    else if (h < 240)  { g = x; b = c; }
+    else if (h < 300)  { r = x; b = c; }
+    else               { r = c; b = x; }
+    return ((uint32_t)(r * 255.0f + 0.5f) << 16) |
+           ((uint32_t)(g * 255.0f + 0.5f) << 8) |
+            (uint32_t)(b * 255.0f + 0.5f);
+}
+
+static int led_rgb_to_value(uint32_t rgb)
+{
+    int best = 0;
+    long best_dist = 1L << 30;
+    int tr = (int)((rgb >> 16) & 0xFF);
+    int tg = (int)((rgb >> 8) & 0xFF);
+    int tb = (int)(rgb & 0xFF);
+    for (int v = 0; v <= 100; v++) {
+        uint32_t c = led_value_to_rgb(v);
+        long d = labs((long)((c >> 16) & 0xFF) - tr) +
+                 labs((long)((c >> 8) & 0xFF) - tg) +
+                 labs((long)(c & 0xFF) - tb);
+        if (d < best_dist) {
+            best_dist = d;
+            best = v;
+        }
+    }
+    return best;
 }
 
 static int battery_capacity(void)
@@ -736,6 +811,11 @@ static void item_init_values(void)
     items[I_LEDBRI].value = clampi(sval_get("ledvalue"), 0, 10) * 10;
     if (!sval_get("ledswitch"))
         items[I_LEDBRI].value = 0;
+    items[I_LEDCOLOR].value = led_rgb_to_value(g_cfg.led_color);
+    /* Re-apply on open: keymon's low-battery alert overwrites the color and
+     * does not restore it afterwards. */
+    if (g_cfg.led_color_set)
+        led_color_apply(led_value_to_rgb(items[I_LEDCOLOR].value));
     items[I_MUTE].value = 0; /* start unmuted; mute always saves current volume */
     g_saved_vol = items[I_VOL].value;
 
@@ -818,6 +898,16 @@ static void item_apply(int idx)
     case I_LEDBRI:
         led_apply(it->value > 0, it->value / 10);
         break;
+    case I_LEDCOLOR: {
+        uint32_t rgb = led_value_to_rgb(it->value);
+        led_color_apply(rgb);
+        /* Keep the change in memory while the slider moves; write the config
+         * once when the panel closes instead of on every D-pad repeat. */
+        g_cfg.led_color = rgb;
+        g_cfg.led_color_set = 1;
+        g_led_color_changed = 1;
+        break;
+    }
     case I_MUTE:
         if (it->value) {
             g_saved_vol = items[I_VOL].value;
@@ -851,6 +941,13 @@ static void item_value_text(int idx, char *buf, size_t n)
 {
     if (idx == I_TMP)
         snprintf(buf, n, "%+d", items[idx].value - 50);
+    else if (idx == I_LEDCOLOR) {
+        uint32_t rgb = led_value_to_rgb(items[idx].value);
+        if (!rgb)
+            snprintf(buf, n, "%s", TR(S_OFF));
+        else
+            snprintf(buf, n, "#%06X", rgb);
+    }
     else if (items[idx].kind == IT_TOGGLE)
         snprintf(buf, n, "%s", items[idx].value ? TR(S_ON) : TR(S_OFF));
     else
@@ -884,6 +981,24 @@ static void draw_row_slider(int x, int y, int w, int value, int focused)
         kx = x + w - h;
     fill_circle_a(kx, y + h / 2, focused ? 8 : 6, 0xF5F6FA, 255);
     fill_circle_a(kx, y + h / 2, focused ? 5 : 3, 0xE62037, 255);
+}
+
+/* Same track as the other sliders, but filled with the colors it selects:
+ * white -> hue wheel -> black. */
+static void draw_color_slider(int x, int y, int w, int value, int focused)
+{
+    int h = 6;
+    for (int i = 0; i < w; i++) {
+        int v = i * 100 / (w > 1 ? w - 1 : 1);
+        fill_rect_a(x + i, y, 1, h, led_value_to_rgb(v), 255);
+    }
+    int kx = x + w * value / 100;
+    if (kx < x + h)
+        kx = x + h;
+    if (kx > x + w - h)
+        kx = x + w - h;
+    fill_circle_a(kx, y + h / 2, focused ? 9 : 7, 0x101016, 255);
+    fill_circle_a(kx, y + h / 2, focused ? 7 : 5, 0xF5F6FA, 255);
 }
 
 static void draw_confirm(void)
@@ -945,10 +1060,19 @@ static void compose(void)
         if (it->kind == IT_SLIDER || it->kind == IT_TOGGLE) {
             char vb[32];
             item_value_text(i, vb, sizeof vb);
+            if (i == I_LEDCOLOR) {
+                uint32_t rgb = led_value_to_rgb(it->value);
+                fill_round_a(px + PANEL_W - 126, y + 3, 16, 14, 4,
+                             rgb ? rgb : 0x2A2C36, 255);
+            }
             draw_text(vb, px + PANEL_W - 28, y + 2, g_f_small,
                       focused ? 0xE62037 : 0x9698A2, 2);
-            if (it->kind == IT_SLIDER)
-                draw_row_slider(px + 76, y + 27, PANEL_W - 104, it->value, focused);
+            if (it->kind == IT_SLIDER) {
+                if (i == I_LEDCOLOR)
+                    draw_color_slider(px + 76, y + 27, PANEL_W - 104, it->value, focused);
+                else
+                    draw_row_slider(px + 76, y + 27, PANEL_W - 104, it->value, focused);
+            }
         } else {
             draw_text(disabled ? "-" : (focused ? TR(S_ACCEPT) : ">"),
                       px + PANEL_W - 28, y + 2, g_f_small,
@@ -1090,6 +1214,8 @@ static void config_save(void)
         fprintf(f, "step=%d\n", g_cfg.step);
         fprintf(f, "confirm_exit=%d\n", g_cfg_confirm ? 1 : 0);
         fprintf(f, "lang=%s\n", g_lang == LANG_EN ? "en" : (g_lang == LANG_PT ? "pt" : "es"));
+        if (g_cfg.led_color_set)
+            fprintf(f, "ledcolor=%06X\n", g_cfg.led_color);
         fclose(f);
         sync();
     }
@@ -1160,9 +1286,13 @@ static void config_activate(void)
         g_cfg_confirm = 1;
         g_cfg_enabled = 1;
         g_dim = g_cfg.dim;
+        cfg_update_led_color(&g_cfg, 0xFFFFFF, 0);
         break;
     case CFG_ABOUT:
         g_about = 1;
+        return;
+    case CFG_UPDATE:
+        upd_check();
         return;
     case CFG_LISTO:     do_close(EXIT_CLOSE); break;
     default: break;
@@ -1176,8 +1306,16 @@ static void config_compose(void)
 
     draw_text("OVERLYDER", SCR_W / 2, 55, g_f_big, 0xF0F2F8, 1);
 
+    if (g_upd_state != UPD_NONE) {
+        update_compose();
+        return;
+    }
+
     if (g_about) {
-        draw_text(TR(S_ABOUT_TEXT), SCR_W / 2, 330, g_f_mid, 0xC0C2CC, 1);
+        char vb[64];
+        snprintf(vb, sizeof vb, "OverLyder v%s", APP_VERSION);
+        draw_text(vb, SCR_W / 2, 300, g_f_mid, 0xE62037, 1);
+        draw_text(TR(S_ABOUT_TEXT), SCR_W / 2, 360, g_f_small, 0xC0C2CC, 1);
         draw_text(TR(S_ABOUT_HINT), SCR_W / 2, 600, g_f_small, 0x9698A2, 1);
         return;
     }
@@ -1210,6 +1348,7 @@ static void config_compose(void)
     snprintf(labels[CFG_LEARN], sizeof labels[0], "%s", TR(S_LEARN));
     snprintf(labels[CFG_RESET], sizeof labels[0], "%s", TR(S_RESET));
     snprintf(labels[CFG_ABOUT], sizeof labels[0], "%s", TR(S_ABOUT));
+    snprintf(labels[CFG_UPDATE], sizeof labels[0], "%s", TR(S_UPDATE));
     snprintf(labels[CFG_LISTO], sizeof labels[0], "%s", TR(S_CFG_LISTO));
 
     snprintf(values[CFG_ESTADO], sizeof values[0], "%s",
@@ -1223,6 +1362,7 @@ static void config_compose(void)
     values[CFG_LEARN][0] = '\0';
     values[CFG_RESET][0] = '\0';
     values[CFG_ABOUT][0] = '\0';
+    snprintf(values[CFG_UPDATE], sizeof values[0], "v%s", APP_VERSION);
     values[CFG_LISTO][0] = '\0';
 
     int y0 = 150, row = 0;
@@ -1239,6 +1379,109 @@ static void config_compose(void)
     }
 
     draw_text(TR(S_CFG_FOOTER), SCR_W / 2, 684, g_f_small, 0x9698A2, 1);
+}
+
+/* ------------------------------------------------------------------ */
+/* self-updater (CrossMix app only - never in the in-game overlay)      */
+/* ------------------------------------------------------------------ */
+
+static void update_compose(void)
+{
+    draw_text(TR(S_UPDATE_TITLE), SCR_W / 2, 130, g_f_mid, 0xE62037, 1);
+
+    if (g_upd_state == UPD_CHECKING) {
+        draw_text(TR(S_UPDATE_CHECKING), SCR_W / 2, 300, g_f_mid, 0xF0F2F8, 1);
+        return;
+    }
+    if (g_upd_state == UPD_INSTALLING) {
+        draw_text(TR(S_UPDATE_INSTALLING), SCR_W / 2, 300, g_f_mid, 0xF0F2F8, 1);
+        return;
+    }
+
+    char buf[160];
+    snprintf(buf, sizeof buf, "%s: v%s", TR(S_UPDATE_LOCAL), APP_VERSION);
+    draw_text(buf, SCR_W / 2, 250, g_f_mid, 0xC0C2CC, 1);
+    if (g_upd_latest[0]) {
+        snprintf(buf, sizeof buf, "%s: v%s", TR(S_UPDATE_LATEST), g_upd_latest);
+        draw_text(buf, SCR_W / 2, 300, g_f_mid, 0xC0C2CC, 1);
+    }
+
+    const char *msg = NULL;
+    uint32_t color = 0xF0F2F8;
+    switch (g_upd_state) {
+    case UPD_UPTODATE:  msg = TR(S_UPDATE_UPTODATE); break;
+    case UPD_AVAILABLE:
+    case UPD_CONFIRM:   msg = TR(S_UPDATE_AVAILABLE); break;
+    case UPD_INSTALLED: msg = TR(S_UPDATE_INSTALLED); break;
+    case UPD_ERROR:     msg = TR(S_UPDATE_ERROR); color = 0xE62037; break;
+    default: break;
+    }
+    if (msg)
+        draw_text(msg, SCR_W / 2, 380, g_f_mid, color, 1);
+
+    if (g_upd_state == UPD_AVAILABLE)
+        draw_text(TR(S_UPDATE_CONFIRM), SCR_W / 2, 470, g_f_small, 0x9698A2, 1);
+    draw_text(TR(S_UPDATE_BACK), SCR_W / 2, 620, g_f_small, 0x9698A2, 1);
+}
+
+/* true when version a is newer than b ("0.0.2" or "v0.0.2" both accepted). */
+static int ver_newer(const char *a, const char *b)
+{
+    int am = 0, an = 0, ap = 0, bm = 0, bn = 0, bp = 0;
+    if (*a == 'v' || *a == 'V') a++;
+    if (*b == 'v' || *b == 'V') b++;
+    sscanf(a, "%d.%d.%d", &am, &an, &ap);
+    sscanf(b, "%d.%d.%d", &bm, &bn, &bp);
+    if (am != bm) return am > bm;
+    if (an != bn) return an > bn;
+    return ap > bp;
+}
+
+/* updater.sh prints "OK <tag>" or "ERR <code>" on a single line. */
+static void upd_run(const char *op)
+{
+    char out[256] = "";
+    char cmd[512];
+    snprintf(cmd, sizeof cmd,
+             "GITHUB_OWNER=%s GITHUB_REPO=%s sh %s %s %s 2>/dev/null",
+             GITHUB_OWNER, GITHUB_REPO, UPDATER_SCRIPT, op, APP_VERSION);
+    if (read_cmd(out, sizeof out, "%s", cmd) != 0) {
+        g_upd_state = UPD_ERROR;
+        return;
+    }
+    char res[16] = "", arg[64] = "";
+    if (sscanf(out, "%15s %63s", res, arg) < 1 || strcmp(res, "OK")) {
+        g_upd_state = UPD_ERROR;
+        return;
+    }
+    if (!strcmp(op, "check")) {
+        snprintf(g_upd_latest, sizeof g_upd_latest, "%s", arg);
+        g_upd_state = ver_newer(g_upd_latest, APP_VERSION) ? UPD_AVAILABLE
+                                                           : UPD_UPTODATE;
+    } else {
+        g_upd_state = UPD_INSTALLED;
+    }
+}
+
+static void upd_check(void)
+{
+    g_upd_state = UPD_CHECKING;
+    g_upd_latest[0] = '\0';
+    g_dirty = 1;
+    config_compose();
+    fb_flip();
+    upd_run("check");
+    g_dirty = 1;
+}
+
+static void upd_install(void)
+{
+    g_upd_state = UPD_INSTALLING;
+    g_dirty = 1;
+    config_compose();
+    fb_flip();
+    upd_run("install");
+    g_dirty = 1;
 }
 
 static int find_input_device(char *out, size_t outsz)
@@ -1647,6 +1890,24 @@ int main(int argc, char **argv)
                             /* ignored */
                         } else if (!g_mode_cfg && now_ms() - g_open_at < 300) {
                             /* ignore events queued from the opening gesture */
+                        } else if (g_mode_cfg && g_upd_state != UPD_NONE) {
+                            if (g_upd_state == UPD_CHECKING ||
+                                g_upd_state == UPD_INSTALLING) {
+                                /* network/install in progress: ignore input */
+                            } else if (e->code == K_B || e->code == K_MODE ||
+                                       e->code == K_START || e->code == K_SELECT) {
+                                if (g_upd_state == UPD_CONFIRM)
+                                    g_upd_state = UPD_AVAILABLE; /* cancel install */
+                                else
+                                    g_upd_state = UPD_NONE;      /* back to settings */
+                            } else if (e->code == K_A) {
+                                if (g_upd_state == UPD_AVAILABLE)
+                                    g_upd_state = UPD_CONFIRM;
+                                else if (g_upd_state == UPD_CONFIRM)
+                                    upd_install();
+                                else
+                                    g_upd_state = UPD_NONE;
+                            }
                         } else if (g_mode_cfg && g_about) {
                             if (e->code == K_A || e->code == K_B || e->code == K_MODE ||
                                 e->code == K_START || e->code == K_SELECT)
@@ -1792,6 +2053,8 @@ int main(int argc, char **argv)
         TTF_CloseFont(g_f_icon);
     TTF_Quit();
     SDL_Quit();
+    if (g_led_color_changed)
+        cfg_update_led_color(&g_cfg, g_cfg.led_color, 1);
     logm("ui exit code %d", g_exit_code);
     return g_exit_code;
 }

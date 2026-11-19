@@ -21,10 +21,11 @@ Hold the Home button (or a combo you choose) and a Switch-style overlay slides o
 
 ## Features
 
-- Volume, brightness, contrast, exposure, saturation, colour temperature and the LED brightness
+- Volume, brightness, contrast, exposure, saturation, colour temperature, LED brightness and LED color (static RGB, restored at boot)
 - Mute, quit the game, reboot and shut down
 - No patches or setup inside the game
 - Trigger, hold time and language (Spanish, English, Portuguese) set from the app
+- Built-in updater in the app: shows the installed version and checks GitHub releases for a newer one
 
 ## Install
 
@@ -42,6 +43,10 @@ If you're on the device over SSH, run `sh install.sh` as root from the repo root
 | Close it | <kbd>B</kbd> or <kbd>Home</kbd> |
 
 You can tweak the trigger and timing from the app.
+
+## Updates
+
+The **Actualizar / Update** row in the app's settings screen shows the installed version (`v0.0.2` in this build), queries the [releases](https://github.com/NachitoE/overlyder-trimui/releases) of this repository for the latest tag and compares them. If a newer version is published, press **A** to download and install `OverLyder.zip` from that release (your `overlay.cfg` is left untouched). Restart the app afterwards to run the new binary. With no connection it simply reports that the check failed and leaves the install as it is.
 
 ## License
 

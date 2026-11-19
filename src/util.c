@@ -138,6 +138,8 @@ void cfg_defaults(overlay_cfg *c)
     c->step = 5;
     c->confirm_exit = 1;
     c->lang = 0; /* Spanish by default */
+    c->led_color = 0xFFFFFF;
+    c->led_color_set = 0; /* do not override CrossMix LED presets by default */
 }
 
 static void trim(char *s)
@@ -207,8 +209,86 @@ int cfg_load(overlay_cfg *c)
                 c->lang = 2;
             else if (!strcasecmp(v, "es") || !strcmp(v, "0"))
                 c->lang = 0;
+        } else if (!strcasecmp(k, "ledcolor")) {
+            const char *hex = v;
+            if (*hex == '#')
+                hex++;
+            else if (hex[0] == '0' && (hex[1] == 'x' || hex[1] == 'X'))
+                hex += 2;
+            if (*hex && isxdigit((unsigned char)hex[0])) {
+                unsigned long rgb = strtoul(hex, NULL, 16);
+                if (rgb <= 0xFFFFFF) {
+                    c->led_color = (uint32_t)rgb;
+                    c->led_color_set = 1;
+                }
+            }
         }
     }
     fclose(f);
     return 0;
+}
+
+/* Apply a static color to the stick rings and the center LED. The driver
+ * exposes these as RRGGBB strings; effect 4 is "static" and cycles -1 means
+ * keep it until something else changes it. Brightness stays under the control
+ * of the LED brightness row (max_scale / effect_enable). */
+void led_color_apply(uint32_t rgb)
+{
+    char hex[16];
+    snprintf(hex, sizeof hex, "%06X ", rgb & 0xFFFFFF);
+
+    write_str_file(LED_SYS "effect_rgb_hex_lr", hex);
+    write_str_file(LED_SYS "effect_rgb_hex_l", hex);
+    write_str_file(LED_SYS "effect_rgb_hex_r", hex);
+    write_str_file(LED_SYS "effect_rgb_hex_m", hex);
+
+    int effect = rgb ? 4 : 0; /* 0 = disable, 4 = static */
+    write_int_file(LED_SYS "effect_lr", effect);
+    write_int_file(LED_SYS "effect_l", effect);
+    write_int_file(LED_SYS "effect_r", effect);
+    write_int_file(LED_SYS "effect_m", effect);
+    write_int_file(LED_SYS "effect_cycles_lr", -1);
+    write_int_file(LED_SYS "effect_cycles_m", -1);
+}
+
+/* Persist the color in overlay.cfg without touching the other settings (the
+ * config screen rewrites the whole file on its own). When enabled is 0 the
+ * ledcolor line is removed, so the daemon leaves CrossMix's LED preset alone
+ * at boot. */
+void cfg_update_led_color(overlay_cfg *c, uint32_t rgb, int enabled)
+{
+    c->led_color = rgb & 0xFFFFFF;
+    c->led_color_set = enabled ? 1 : 0;
+
+    FILE *f = fopen(CFG_PATH, "r");
+    if (!f)
+        return;
+    char lines[64][256];
+    int n = 0;
+    while (n < 64 && fgets(lines[n], sizeof lines[0], f)) {
+        char key[512], *eq;
+        snprintf(key, sizeof key, "%s", lines[n]);
+        eq = strchr(key, '=');
+        if (eq) {
+            *eq = '\0';
+            char *k = key;
+            while (*k && isspace((unsigned char)*k))
+                k++;
+            if (!strcasecmp(k, "ledcolor"))
+                continue; /* drop old value */
+        }
+        n++;
+    }
+    fclose(f);
+
+    FILE *out = fopen(CFG_PATH ".tmp", "w");
+    if (!out)
+        return;
+    for (int i = 0; i < n; i++)
+        fputs(lines[i], out);
+    if (enabled)
+        fprintf(out, "ledcolor=%06X\n", c->led_color);
+    fclose(out);
+    if (rename(CFG_PATH ".tmp", CFG_PATH) == 0)
+        sync();
 }

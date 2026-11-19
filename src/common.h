@@ -7,6 +7,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -31,6 +32,14 @@
 #define SYSTEMVAL_BIN   "/usr/trimui/bin/systemval"
 #define SHMVAR_BIN      "/usr/trimui/bin/shmvar"
 #define DISP_ATTR       "/sys/class/disp/disp/attr/"
+#define LED_SYS         "/sys/class/led_anim/"
+
+/* self-updater: local build version + GitHub release source. The tag of the
+ * latest release is compared against APP_VERSION in the CrossMix config app. */
+#define APP_VERSION     "0.0.2"
+#define GITHUB_OWNER    "NachitoE"
+#define GITHUB_REPO     "overlyder-trimui"
+#define UPDATER_SCRIPT  "/mnt/SDCARD/Apps/OverLyder/updater.sh"
 
 /* exit codes shared between overlay_ui and overlayd */
 #define EXIT_CLOSE      0
@@ -58,10 +67,14 @@ typedef struct {
     int step;         /* default percent step */
     int confirm_exit; /* 1 = ask before exit/reboot/poweroff */
     int lang;         /* 0 = Spanish, 1 = English, 2 = Portuguese */
+    uint32_t led_color;   /* 0xRRGGBB static LED color */
+    int led_color_set;    /* 1 = ledcolor was configured (apply at boot) */
 } overlay_cfg;
 
 void cfg_defaults(overlay_cfg *c);
 int  cfg_load(overlay_cfg *c);
+void cfg_update_led_color(overlay_cfg *c, uint32_t rgb, int enabled);
+void led_color_apply(uint32_t rgb);
 
 long now_ms(void);
 void logm(const char *fmt, ...);

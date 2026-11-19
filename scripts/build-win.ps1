@@ -36,7 +36,7 @@ Write-Host "=== release package"
 $pkg = "$Out\OverLyder"
 New-Item -ItemType Directory -Force -Path "$pkg\bin", "$pkg\resources", "$pkg\defaults" | Out-Null
 Copy-Item "app\config.json", "app\icon.png", "app\launch.sh", "app\overlayctl", `
-          "app\overLyder.start" -Destination $pkg -Force
+          "app\overLyder.start", "app\updater.sh" -Destination $pkg -Force
 Copy-Item "app\defaults\overlay.cfg" -Destination "$pkg\defaults" -Force
 Copy-Item "app\resources\*" -Destination "$pkg\resources" -Force
 Copy-Item "$Out\bin\overlayd", "$Out\bin\overlay_ui" -Destination "$pkg\bin" -Force

@@ -458,6 +458,15 @@ int main(int argc, char **argv)
     }
     logm("using input device %s", dev);
 
+    /* Apply a saved LED color once the device has finished booting. Doing it
+     * here (after waiting for input) avoids being overwritten by the firmware
+     * startup scripts. Skipped when no color was ever chosen, so CrossMix LED
+     * presets keep working for other users. */
+    if (g_cfg.led_color_set) {
+        led_color_apply(g_cfg.led_color);
+        logm("restored LED color #%06X", g_cfg.led_color);
+    }
+
     int fd = open(dev, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
     if (fd < 0) {
         logm("cannot open %s: %s", dev, strerror(errno));

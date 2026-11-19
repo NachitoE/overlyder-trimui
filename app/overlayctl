@@ -1,0 +1,46 @@
+#!/bin/sh
+# overlayctl - start / stop / status of the overlay daemon
+APP=/mnt/SDCARD/Apps/OverLyder
+DAEMON="$APP/bin/overlayd"
+PIDFILE=/tmp/overlayd.pid
+DISABLE=/mnt/SDCARD/System/etc/overlay.disabled
+
+is_running() {
+    [ -s "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE" 2>/dev/null)" 2>/dev/null
+}
+
+case "$1" in
+    start)
+        [ -f "$DISABLE" ] && { echo "overlay disabled"; exit 0; }
+        is_running && { echo "already running"; exit 0; }
+        [ -x "$DAEMON" ] || { echo "daemon not installed"; exit 1; }
+        "$DAEMON" >/dev/null 2>&1 &
+        echo "started"
+        ;;
+    stop)
+        if is_running; then
+            kill "$(cat "$PIDFILE")" 2>/dev/null
+            echo "stopped"
+        else
+            echo "not running"
+        fi
+        ;;
+    restart)
+        if is_running; then kill "$(cat "$PIDFILE")" 2>/dev/null; fi
+        sleep 0.5
+        "$0" start
+        ;;
+    status)
+        if [ -f "$DISABLE" ]; then
+            echo "disabled"
+        elif is_running; then
+            echo "running (pid $(cat "$PIDFILE"))"
+        else
+            echo "stopped"
+        fi
+        ;;
+    *)
+        echo "usage: $0 {start|stop|restart|status}"
+        exit 2
+        ;;
+esac

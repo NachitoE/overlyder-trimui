@@ -1,0 +1,8 @@
+#!/bin/sh
+# CrossMix startup hook (installed as /mnt/SDCARD/System/starts/overLyder.sh)
+APP=/mnt/SDCARD/Apps/OverLyder
+[ -x "$APP/bin/overlayd" ] || exit 0
+[ -f /mnt/SDCARD/System/etc/overlay.disabled ] && exit 0
+
+# the daemon itself waits for the input device to appear
+"$APP/overlayctl" start

@@ -1,0 +1,7 @@
+{
+  "label": "OverLyder",
+  "icon": "icon.png",
+  "iconsel": "icon.png",
+  "launch": "launch.sh",
+  "description": "Panel rapido estilo Switch (sliders de volumen, brillo e imagen) con gatillo y combinacion de botones configurables."
+}

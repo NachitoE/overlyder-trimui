@@ -1,0 +1,23 @@
+# .gitignore for the future PUBLIC repository.
+# Copy/rename this file to .gitignore there. Unlike the private repo,
+# docs/ IS included in the public one.
+
+# Python
+__pycache__/
+*.py[cod]
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+*~
+.idea/
+.vscode/
+
+# Secrets and local artifacts
+.env
+*.key
+*.pem
+*.log
+*.tmp
+*.bak

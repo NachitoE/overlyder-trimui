@@ -12,7 +12,6 @@ static overlay_cfg g_cfg;
 static pid_t g_stopped[MAX_STOP];
 static int g_nstopped = 0;
 static int g_has_game = 0;
-
 static void on_signal(int sig)
 {
     (void)sig;
@@ -458,10 +457,9 @@ int main(int argc, char **argv)
     }
     logm("using input device %s", dev);
 
-    /* Apply a saved LED color once the device has finished booting. Doing it
-     * here (after waiting for input) avoids being overwritten by the firmware
-     * startup scripts. Skipped when no color was ever chosen, so CrossMix LED
-     * presets keep working for other users. */
+    /* Restore the saved fixed color after the firmware has finished starting
+     * (waiting for the input device gives it time). Skipped when no color was
+     * ever chosen, so CrossMix's own LED settings are left alone. */
     if (g_cfg.led_color_set) {
         led_color_apply(g_cfg.led_color);
         logm("restored LED color #%06X", g_cfg.led_color);

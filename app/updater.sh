@@ -5,8 +5,8 @@
 #   updater.sh install <tag>           -> "OK"               or  "ERR <code>"
 #
 # Exactly one line is printed so the C caller can parse it with sscanf(). The
-# version comparison itself lives in overlay_ui.c (APP_VERSION); this script
-# only reports what GitHub publishes and performs the install when asked.
+# version, owner and repo come from manifest.json (read by overlay_ui.c); this
+# script only reports what GitHub publishes and performs the install when asked.
 
 OWNER="${GITHUB_OWNER:-NachitoE}"
 REPO="${GITHUB_REPO:-overlyder-trimui}"

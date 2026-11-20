@@ -23,6 +23,8 @@
 #include <sys/ioctl.h>
 #include <linux/input.h>
 
+#define APP_DIR         "/mnt/SDCARD/Apps/OverLyder"
+#define MANIFEST_PATH   APP_DIR "/manifest.json"
 #define CFG_PATH        "/mnt/SDCARD/System/etc/overlay.cfg"
 #define DISABLE_FLAG    "/mnt/SDCARD/System/etc/overlay.disabled"
 #define PID_FILE        "/tmp/overlayd.pid"
@@ -34,12 +36,17 @@
 #define DISP_ATTR       "/sys/class/disp/disp/attr/"
 #define LED_SYS         "/sys/class/led_anim/"
 
-/* self-updater: local build version + GitHub release source. The tag of the
- * latest release is compared against APP_VERSION in the CrossMix config app. */
-#define APP_VERSION     "0.0.2"
-#define GITHUB_OWNER    "NachitoE"
-#define GITHUB_REPO     "overlyder-trimui"
-#define UPDATER_SCRIPT  "/mnt/SDCARD/Apps/OverLyder/updater.sh"
+/* Runtime metadata (version + updater source) lives in manifest.json so it
+ * can be changed without rebuilding the binaries. */
+typedef struct {
+    char version[32];
+    char owner[64];
+    char repo[64];
+    char updater[128];
+    char credits[128];
+} app_manifest;
+
+void manifest_load(app_manifest *m);
 
 /* exit codes shared between overlay_ui and overlayd */
 #define EXIT_CLOSE      0
@@ -68,12 +75,13 @@ typedef struct {
     int confirm_exit; /* 1 = ask before exit/reboot/poweroff */
     int lang;         /* 0 = Spanish, 1 = English, 2 = Portuguese */
     uint32_t led_color;   /* 0xRRGGBB static LED color */
-    int led_color_set;    /* 1 = ledcolor was configured (apply at boot) */
+    int led_color_set;    /* 1 = a color was configured */
 } overlay_cfg;
 
 void cfg_defaults(overlay_cfg *c);
 int  cfg_load(overlay_cfg *c);
 void cfg_update_led_color(overlay_cfg *c, uint32_t rgb, int enabled);
+uint32_t led_hue_rgb(int hue);
 void led_color_apply(uint32_t rgb);
 
 long now_ms(void);

@@ -1,6 +1,7 @@
 #include "common.h"
 
 #include <ctype.h>
+#include <math.h>
 #include <sys/stat.h>
 
 long now_ms(void)
@@ -128,6 +129,53 @@ int keycode_from_name(const char *name)
     return -1;
 }
 
+/* Minimal JSON string reader: the manifest is a tiny flat object, so pulling
+ * quoted values out with strstr is enough and avoids a JSON dependency. */
+static void json_string(const char *json, const char *key, char *out, size_t n)
+{
+    char needle[64];
+    snprintf(needle, sizeof needle, "\"%s\"", key);
+    const char *p = strstr(json, needle);
+    if (!p)
+        return;
+    p = strchr(p, ':');
+    if (!p)
+        return;
+    p++;
+    while (*p && isspace((unsigned char)*p))
+        p++;
+    if (*p++ != '"')
+        return;
+    size_t i = 0;
+    while (*p && *p != '"' && i + 1 < n)
+        out[i++] = *p++;
+    out[i] = '\0';
+}
+
+void manifest_load(app_manifest *m)
+{
+    memset(m, 0, sizeof *m);
+    snprintf(m->version, sizeof m->version, "0.0.2");
+    snprintf(m->owner, sizeof m->owner, "NachitoE");
+    snprintf(m->repo, sizeof m->repo, "overlyder-trimui");
+    snprintf(m->updater, sizeof m->updater, "updater.sh");
+    snprintf(m->credits, sizeof m->credits, "github.com/nachitoe");
+
+    FILE *f = fopen(MANIFEST_PATH, "r");
+    if (!f)
+        return;
+    char buf[2048];
+    size_t n = fread(buf, 1, sizeof buf - 1, f);
+    buf[n] = '\0';
+    fclose(f);
+
+    json_string(buf, "version", m->version, sizeof m->version);
+    json_string(buf, "owner", m->owner, sizeof m->owner);
+    json_string(buf, "repo", m->repo, sizeof m->repo);
+    json_string(buf, "updater", m->updater, sizeof m->updater);
+    json_string(buf, "credits", m->credits, sizeof m->credits);
+}
+
 void cfg_defaults(overlay_cfg *c)
 {
     memset(c, 0, sizeof *c);
@@ -228,10 +276,28 @@ int cfg_load(overlay_cfg *c)
     return 0;
 }
 
-/* Apply a static color to the stick rings and the center LED. The driver
- * exposes these as RRGGBB strings; effect 4 is "static" and cycles -1 means
- * keep it until something else changes it. Brightness stays under the control
- * of the LED brightness row (max_scale / effect_enable). */
+/* Full-saturation RGB for a hue in degrees (0 = red). Only used to generate
+ * the color list of the "Rainbow fade" script. */
+uint32_t led_hue_rgb(int hue)
+{
+    hue = ((hue % 360) + 360) % 360;
+    float h = (float)hue;
+    float x = 1.0f - fabsf(fmodf(h / 60.0f, 2.0f) - 1.0f);
+    float r = 0, g = 0, b = 0;
+    if (h < 60)        { r = 1; g = x; }
+    else if (h < 120)  { r = x; g = 1; }
+    else if (h < 180)  { g = 1; b = x; }
+    else if (h < 240)  { g = x; b = 1; }
+    else if (h < 300)  { r = x; b = 1; }
+    else               { r = 1; b = x; }
+    return ((uint32_t)(r * 255.0f + 0.5f) << 16) |
+           ((uint32_t)(g * 255.0f + 0.5f) << 8) |
+            (uint32_t)(b * 255.0f + 0.5f);
+}
+
+/* ------------------------------------------------------------------ */
+/* Fixed LED color: write the RRGGBB target and a static effect directly to
+ * the TrimUI driver. Brightness stays with the LED brightness row. */
 void led_color_apply(uint32_t rgb)
 {
     char hex[16];
@@ -242,7 +308,7 @@ void led_color_apply(uint32_t rgb)
     write_str_file(LED_SYS "effect_rgb_hex_r", hex);
     write_str_file(LED_SYS "effect_rgb_hex_m", hex);
 
-    int effect = rgb ? 4 : 0; /* 0 = disable, 4 = static */
+    int effect = rgb ? 4 : 0; /* 0 = off, 4 = static */
     write_int_file(LED_SYS "effect_lr", effect);
     write_int_file(LED_SYS "effect_l", effect);
     write_int_file(LED_SYS "effect_r", effect);
@@ -260,11 +326,14 @@ void cfg_update_led_color(overlay_cfg *c, uint32_t rgb, int enabled)
     c->led_color = rgb & 0xFFFFFF;
     c->led_color_set = enabled ? 1 : 0;
 
-    FILE *f = fopen(CFG_PATH, "r");
-    if (!f)
-        return;
     char lines[64][256];
     int n = 0;
+    FILE *f = fopen(CFG_PATH, "r");
+    if (!f) {
+        /* Fresh install: still write the LED settings so the daemon can pick
+         * them up and other keys fall back to their defaults. */
+        snprintf(lines[n++], sizeof lines[0], "# OverLyder configuration\n");
+    } else
     while (n < 64 && fgets(lines[n], sizeof lines[0], f)) {
         char key[512], *eq;
         snprintf(key, sizeof key, "%s", lines[n]);
@@ -274,12 +343,13 @@ void cfg_update_led_color(overlay_cfg *c, uint32_t rgb, int enabled)
             char *k = key;
             while (*k && isspace((unsigned char)*k))
                 k++;
-            if (!strcasecmp(k, "ledcolor"))
-                continue; /* drop old value */
+            if (!strcasecmp(k, "ledcolor") || !strcasecmp(k, "ledmode"))
+                continue; /* drop old values (ledmode is obsolete) */
         }
         n++;
     }
-    fclose(f);
+    if (f)
+        fclose(f);
 
     FILE *out = fopen(CFG_PATH ".tmp", "w");
     if (!out)

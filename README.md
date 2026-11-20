@@ -46,7 +46,7 @@ You can tweak the trigger and timing from the app.
 
 ## Updates
 
-The **Actualizar / Update** row in the app's settings screen shows the installed version (`v0.0.2` in this build), queries the [releases](https://github.com/NachitoE/overlyder-trimui/releases) of this repository for the latest tag and compares them. If a newer version is published, press **A** to download and install `OverLyder.zip` from that release (your `overlay.cfg` is left untouched). Restart the app afterwards to run the new binary. With no connection it simply reports that the check failed and leaves the install as it is.
+The app presents an updater, which pulls directly from the releases in this github page.
 
 ## License
 

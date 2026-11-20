@@ -17,7 +17,7 @@ HOOK=$STARTS/overLyder.sh
 STAMP=$(date +%Y%m%d-%H%M%S)
 
 for f in "$SRC/dist/bin/overlayd" "$SRC/dist/bin/overlay_ui" \
-         "$SRC/app/config.json" "$SRC/app/icon.png" "$SRC/app/launch.sh" \
+         "$SRC/app/config.json" "$SRC/app/manifest.json" "$SRC/app/icon.png" "$SRC/app/launch.sh" \
          "$SRC/app/overlayctl" "$SRC/app/overLyder.start" "$SRC/app/updater.sh" \
          "$SRC/app/resources/MaterialIcons-Regular.ttf" \
          "$SRC/app/resources/LICENSE-MaterialIcons.txt"; do
@@ -39,6 +39,7 @@ done
 
 echo "Installing app..."
 cp -f "$SRC/app/config.json" "$APP/config.json"
+cp -f "$SRC/app/manifest.json" "$APP/manifest.json"
 cp -f "$SRC/app/icon.png" "$APP/icon.png"
 cp -f "$SRC/app/launch.sh" "$APP/launch.sh"
 cp -f "$SRC/app/overlayctl" "$APP/overlayctl"

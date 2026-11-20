@@ -158,6 +158,7 @@ static long g_learn_at = 0;
 static int g_about = 0;
 
 static overlay_cfg g_cfg;
+static app_manifest g_manifest;
 
 /* Self-updater state (CrossMix config app only). */
 enum {
@@ -229,7 +230,7 @@ static const char *const g_tr[NLANG][S_COUNT] = {
         "Arriba/Abajo o < >: Elegir    A: Cambiar    B: Salir (guardado automatico)",
         "LED", "Brillo LED", "Color LED", "Silenciar", "Encendido", "Apagado",
         "Aprender", "Restablecer", "Acerca de",
-        "Pulsa los botones (B: listo)", "OverLyder 2.0 - Material Icons (Apache 2.0)",
+        "Pulsa los botones (B: listo)", "OverLyder v0.0.2 - Material Icons (Apache 2.0)",
         "A/B: volver",
         "Actualizar", "Actualizador", "Versión instalada", "Última versión",
         "Consultando GitHub...", "Estás al día", "Hay una versión nueva",
@@ -253,7 +254,7 @@ static const char *const g_tr[NLANG][S_COUNT] = {
         "Up/Down or < >: Select    A: Change    B: Exit (auto-saved)",
         "LED", "LED brightness", "LED color", "Mute", "On", "Off",
         "Learn", "Reset", "About",
-        "Press buttons (B: done)", "OverLyder 2.0 - Material Icons (Apache 2.0)",
+        "Press buttons (B: done)", "OverLyder v0.0.2 - Material Icons (Apache 2.0)",
         "A/B: back",
         "Update", "Updater", "Installed version", "Latest version",
         "Checking GitHub...", "You are up to date", "A new version is available",
@@ -277,7 +278,7 @@ static const char *const g_tr[NLANG][S_COUNT] = {
         "Cima/Baixo ou < >: Escolher    A: Alterar    B: Sair (salvamento automático)",
         "LED", "LED brilho", "Cor do LED", "Silenciar", "Ligado", "Desligado",
         "Aprender", "Redefinir", "Sobre",
-        "Pressione os botões (B: pronto)", "OverLyder 2.0 - Material Icons (Apache 2.0)",
+        "Pressione os botões (B: pronto)", "OverLyder v0.0.2 - Material Icons (Apache 2.0)",
         "A/B: voltar",
         "Atualizar", "Atualizador", "Versão instalada", "Última versão",
         "Consultando o GitHub...", "Você está em dia", "Há uma versão nova",
@@ -717,19 +718,7 @@ static uint32_t led_value_to_rgb(int v)
     if (v >= 100)
         return 0x000000;
 
-    float h = (float)(v - 1) * 360.0f / 98.0f;
-    float c = 1.0f;
-    float x = c * (1.0f - fabsf(fmodf(h / 60.0f, 2.0f) - 1.0f));
-    float r = 0, g = 0, b = 0;
-    if (h < 60)        { r = c; g = x; }
-    else if (h < 120)  { r = x; g = c; }
-    else if (h < 180)  { g = c; b = x; }
-    else if (h < 240)  { g = x; b = c; }
-    else if (h < 300)  { r = x; b = c; }
-    else               { r = c; b = x; }
-    return ((uint32_t)(r * 255.0f + 0.5f) << 16) |
-           ((uint32_t)(g * 255.0f + 0.5f) << 8) |
-            (uint32_t)(b * 255.0f + 0.5f);
+    return led_hue_rgb((int)((v - 1) * 360 / 98));
 }
 
 static int led_rgb_to_value(uint32_t rgb)
@@ -812,10 +801,6 @@ static void item_init_values(void)
     if (!sval_get("ledswitch"))
         items[I_LEDBRI].value = 0;
     items[I_LEDCOLOR].value = led_rgb_to_value(g_cfg.led_color);
-    /* Re-apply on open: keymon's low-battery alert overwrites the color and
-     * does not restore it afterwards. */
-    if (g_cfg.led_color_set)
-        led_color_apply(led_value_to_rgb(items[I_LEDCOLOR].value));
     items[I_MUTE].value = 0; /* start unmuted; mute always saves current volume */
     g_saved_vol = items[I_VOL].value;
 
@@ -901,8 +886,8 @@ static void item_apply(int idx)
     case I_LEDCOLOR: {
         uint32_t rgb = led_value_to_rgb(it->value);
         led_color_apply(rgb);
-        /* Keep the change in memory while the slider moves; write the config
-         * once when the panel closes instead of on every D-pad repeat. */
+        /* Defer the config write to panel close so holding < > doesn't touch
+         * the SD card on every D-pad repeat. */
         g_cfg.led_color = rgb;
         g_cfg.led_color_set = 1;
         g_led_color_changed = 1;
@@ -934,7 +919,7 @@ static void item_apply(int idx)
 #define PANEL_X      (SCR_W - PANEL_W - 32)
 #define PANEL_TOP    28
 #define PANEL_H      664
-#define ROW_H        40
+#define ROW_H        37
 #define ROW_TOP      (PANEL_TOP + 88)
 
 static void item_value_text(int idx, char *buf, size_t n)
@@ -1287,6 +1272,7 @@ static void config_activate(void)
         g_cfg_enabled = 1;
         g_dim = g_cfg.dim;
         cfg_update_led_color(&g_cfg, 0xFFFFFF, 0);
+        led_color_apply(0xFFFFFF);
         break;
     case CFG_ABOUT:
         g_about = 1;
@@ -1313,9 +1299,10 @@ static void config_compose(void)
 
     if (g_about) {
         char vb[64];
-        snprintf(vb, sizeof vb, "OverLyder v%s", APP_VERSION);
-        draw_text(vb, SCR_W / 2, 300, g_f_mid, 0xE62037, 1);
-        draw_text(TR(S_ABOUT_TEXT), SCR_W / 2, 360, g_f_small, 0xC0C2CC, 1);
+        snprintf(vb, sizeof vb, "OverLyder v%s", g_manifest.version);
+        draw_text(vb, SCR_W / 2, 270, g_f_mid, 0xE62037, 1);
+        draw_text(g_manifest.credits, SCR_W / 2, 330, g_f_mid, 0xF0F2F8, 1);
+        draw_text(TR(S_ABOUT_TEXT), SCR_W / 2, 400, g_f_small, 0xC0C2CC, 1);
         draw_text(TR(S_ABOUT_HINT), SCR_W / 2, 600, g_f_small, 0x9698A2, 1);
         return;
     }
@@ -1362,7 +1349,7 @@ static void config_compose(void)
     values[CFG_LEARN][0] = '\0';
     values[CFG_RESET][0] = '\0';
     values[CFG_ABOUT][0] = '\0';
-    snprintf(values[CFG_UPDATE], sizeof values[0], "v%s", APP_VERSION);
+    snprintf(values[CFG_UPDATE], sizeof values[0], "v%s", g_manifest.version);
     values[CFG_LISTO][0] = '\0';
 
     int y0 = 150, row = 0;
@@ -1399,7 +1386,7 @@ static void update_compose(void)
     }
 
     char buf[160];
-    snprintf(buf, sizeof buf, "%s: v%s", TR(S_UPDATE_LOCAL), APP_VERSION);
+    snprintf(buf, sizeof buf, "%s: v%s", TR(S_UPDATE_LOCAL), g_manifest.version);
     draw_text(buf, SCR_W / 2, 250, g_f_mid, 0xC0C2CC, 1);
     if (g_upd_latest[0]) {
         snprintf(buf, sizeof buf, "%s: v%s", TR(S_UPDATE_LATEST), g_upd_latest);
@@ -1443,8 +1430,9 @@ static void upd_run(const char *op)
     char out[256] = "";
     char cmd[512];
     snprintf(cmd, sizeof cmd,
-             "GITHUB_OWNER=%s GITHUB_REPO=%s sh %s %s %s 2>/dev/null",
-             GITHUB_OWNER, GITHUB_REPO, UPDATER_SCRIPT, op, APP_VERSION);
+             "GITHUB_OWNER=%s GITHUB_REPO=%s sh " APP_DIR "/%s %s %s 2>/dev/null",
+             g_manifest.owner, g_manifest.repo, g_manifest.updater,
+             op, g_manifest.version);
     if (read_cmd(out, sizeof out, "%s", cmd) != 0) {
         g_upd_state = UPD_ERROR;
         return;
@@ -1456,7 +1444,7 @@ static void upd_run(const char *op)
     }
     if (!strcmp(op, "check")) {
         snprintf(g_upd_latest, sizeof g_upd_latest, "%s", arg);
-        g_upd_state = ver_newer(g_upd_latest, APP_VERSION) ? UPD_AVAILABLE
+        g_upd_state = ver_newer(g_upd_latest, g_manifest.version) ? UPD_AVAILABLE
                                                            : UPD_UPTODATE;
     } else {
         g_upd_state = UPD_INSTALLED;
@@ -1785,6 +1773,9 @@ int main(int argc, char **argv)
 {
     g_mode_cfg = (argc > 1 && !strcmp(argv[1], "--config"));
 
+    manifest_load(&g_manifest);
+    logm("manifest: version %s, updater %s/%s", g_manifest.version,
+         g_manifest.owner, g_manifest.repo);
     cfg_load(&g_cfg);
     g_dim = g_cfg.dim;
     g_lang = clampi(g_cfg.lang, 0, NLANG - 1);

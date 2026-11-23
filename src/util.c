@@ -155,7 +155,7 @@ static void json_string(const char *json, const char *key, char *out, size_t n)
 void manifest_load(app_manifest *m)
 {
     memset(m, 0, sizeof *m);
-    snprintf(m->version, sizeof m->version, "0.0.2");
+    snprintf(m->version, sizeof m->version, "0.0.4");
     snprintf(m->owner, sizeof m->owner, "NachitoE");
     snprintf(m->repo, sizeof m->repo, "overlyder-trimui");
     snprintf(m->updater, sizeof m->updater, "updater.sh");
@@ -296,25 +296,26 @@ uint32_t led_hue_rgb(int hue)
 }
 
 /* ------------------------------------------------------------------ */
-/* Fixed LED color: write the RRGGBB target and a static effect directly to
- * the TrimUI driver. Brightness stays with the LED brightness row. */
+/* Change only the stick rings' target color, keeping the active profile.
+ * The driver latches a new effect_rgb_hex only when the effect is (re)written,
+ * so we briefly select static (4) and immediately restore the previous
+ * effect. Cycles, duration, the center LED and effect_enable are untouched.
+ * "lr" is the combined left+right stick zone (same one System Tools writes). */
 void led_color_apply(uint32_t rgb)
 {
     char hex[16];
     snprintf(hex, sizeof hex, "%06X ", rgb & 0xFFFFFF);
-
     write_str_file(LED_SYS "effect_rgb_hex_lr", hex);
-    write_str_file(LED_SYS "effect_rgb_hex_l", hex);
-    write_str_file(LED_SYS "effect_rgb_hex_r", hex);
-    write_str_file(LED_SYS "effect_rgb_hex_m", hex);
 
-    int effect = rgb ? 4 : 0; /* 0 = off, 4 = static */
-    write_int_file(LED_SYS "effect_lr", effect);
-    write_int_file(LED_SYS "effect_l", effect);
-    write_int_file(LED_SYS "effect_r", effect);
-    write_int_file(LED_SYS "effect_m", effect);
-    write_int_file(LED_SYS "effect_cycles_lr", -1);
-    write_int_file(LED_SYS "effect_cycles_m", -1);
+    int effect = read_int_file(LED_SYS "effect_lr", 4);
+    if (effect == 4) {
+        /* Already static: a 0 -> 4 edge is what makes it re-latch the color. */
+        write_int_file(LED_SYS "effect_lr", 0);
+        write_int_file(LED_SYS "effect_lr", 4);
+    } else {
+        write_int_file(LED_SYS "effect_lr", 4);
+        write_int_file(LED_SYS "effect_lr", effect);
+    }
 }
 
 /* Persist the color in overlay.cfg without touching the other settings (the

@@ -8,6 +8,7 @@
 #include <sys/mount.h>
 #include <dirent.h>
 #include <ctype.h>
+#include <stdint.h>
 
 #define SCR_W 1280
 #define SCR_H 720
@@ -41,6 +42,8 @@ enum {
 #define GL_COLOR   0xE0C3u  /* invert_colors */
 #define GL_MUTE    0xE04Fu  /* volume_off */
 #define GL_BATTERY 0xE1A4u  /* battery_full */
+#define GL_WIFI    0xE63Eu  /* wifi (Material Icons v1.017 codepoint) */
+#define GL_BT      0xE1A7u  /* bluetooth */
 
 typedef struct {
     const char *label;
@@ -68,6 +71,13 @@ static item_t items[] = {
 };
 
 #define NITEMS ((int)(sizeof items / sizeof items[0]))
+
+/* The two circular wireless toggles form one extra row below the action list.
+ * Up/Down treats them as a single stop (so it keeps cycling the menu), while
+ * Left/Right picks WiFi or Bluetooth inside the row. */
+#define SEL_RADIO      NITEMS
+#define NSEL           (NITEMS + 1)
+#define SEL_IS_RADIO(s) ((s) == SEL_RADIO)
 
 /* ------------------------------------------------------------------ */
 /* globals                                                            */
@@ -209,7 +219,7 @@ enum {
     S_UPDATE, S_UPDATE_TITLE, S_UPDATE_LOCAL, S_UPDATE_LATEST,
     S_UPDATE_CHECKING, S_UPDATE_UPTODATE, S_UPDATE_AVAILABLE, S_UPDATE_ERROR,
     S_UPDATE_CONFIRM, S_UPDATE_INSTALLING, S_UPDATE_INSTALLED, S_UPDATE_BACK,
-    S_COUNT
+    S_WIFI, S_BT, S_HINT_RADIO, S_COUNT
 };
 
 static const char *const g_tr[NLANG][S_COUNT] = {
@@ -230,12 +240,13 @@ static const char *const g_tr[NLANG][S_COUNT] = {
         "Arriba/Abajo o < >: Elegir    A: Cambiar    B: Salir (guardado automatico)",
         "LED", "Brillo LED", "Color LED", "Silenciar", "Encendido", "Apagado",
         "Aprender", "Restablecer", "Acerca de",
-        "Pulsa los botones (B: listo)", "OverLyder v0.0.2 - Material Icons (Apache 2.0)",
+        "Pulsa los botones (B: listo)", "Material Icons (Apache 2.0)",
         "A/B: volver",
         "Actualizar", "Actualizador", "Versión instalada", "Última versión",
         "Consultando GitHub...", "Estás al día", "Hay una versión nueva",
         "No se pudo consultar", "A: Instalar   B: Cancelar", "Instalando...",
         "Instalado. Reinicia la app", "B: Volver",
+        "WiFi", "Bluetooth", "^ v: Menu   < >: Elegir   A: Cambiar",
     },
     { /* English */
         "SETTINGS", "HOME / B: close",
@@ -254,12 +265,13 @@ static const char *const g_tr[NLANG][S_COUNT] = {
         "Up/Down or < >: Select    A: Change    B: Exit (auto-saved)",
         "LED", "LED brightness", "LED color", "Mute", "On", "Off",
         "Learn", "Reset", "About",
-        "Press buttons (B: done)", "OverLyder v0.0.2 - Material Icons (Apache 2.0)",
+        "Press buttons (B: done)", "Material Icons (Apache 2.0)",
         "A/B: back",
         "Update", "Updater", "Installed version", "Latest version",
         "Checking GitHub...", "You are up to date", "A new version is available",
         "Could not check", "A: Install   B: Cancel", "Installing...",
         "Installed. Restart the app", "B: Back",
+        "Wi-Fi", "Bluetooth", "^ v: Menu   < >: Select   A: Toggle",
     },
     { /* Portuguese */
         "AJUSTES", "HOME / B: fechar",
@@ -278,12 +290,13 @@ static const char *const g_tr[NLANG][S_COUNT] = {
         "Cima/Baixo ou < >: Escolher    A: Alterar    B: Sair (salvamento automático)",
         "LED", "LED brilho", "Cor do LED", "Silenciar", "Ligado", "Desligado",
         "Aprender", "Redefinir", "Sobre",
-        "Pressione os botões (B: pronto)", "OverLyder v0.0.2 - Material Icons (Apache 2.0)",
+        "Pressione os botões (B: pronto)", "Material Icons (Apache 2.0)",
         "A/B: voltar",
         "Atualizar", "Atualizador", "Versão instalada", "Última versão",
         "Consultando o GitHub...", "Você está em dia", "Há uma versão nova",
         "Não foi possível verificar", "A: Instalar   B: Cancelar", "Instalando...",
         "Instalado. Reinicie o app", "B: Voltar",
+        "Wi-Fi", "Bluetooth", "^ v: Menu   < >: Escolher   A: Alternar",
     },
 };
 
@@ -746,6 +759,116 @@ static int battery_capacity(void)
     return read_int_file("/sys/class/power_supply/axp2202-battery/capacity", -1);
 }
 
+/* ------------------------------------------------------------------ */
+/* wireless toggles                                                    */
+/* ------------------------------------------------------------------ */
+
+/* Stock firmware keeps the on/off setting in system.json ("wifi" and
+ * "bluetooth") and MainUI applies it with the commands below. rfkill(8) is a
+ * broken busybox applet here, so sysfs is used directly for Bluetooth power. */
+#define BT_RFKILL_STATE "/sys/class/rfkill/rfkill0/state"
+
+/* MainUI caches Bluetooth state in two ints: sBluetoothEnable (0x7ba6a0,
+ * read from system.json) and sBluetoothOpened (0x80f894, set by its own
+ * toggle). Its settings page shows On only when both are non-zero. MainUI is
+ * non-PIE (ET_EXEC), so poke them to keep its menu in sync with this overlay. */
+#define MAINUI_BT_ENABLE 0x7ba6a0u
+#define MAINUI_BT_OPENED 0x80f894u
+
+static int g_wifi_on = 0, g_bt_on = 0, g_radio = 0; /* 0 = WiFi, 1 = BT */
+
+static void poke_mainui(int addr, int val)
+{
+    char pidbuf[64], path[96];
+    if (read_cmd(pidbuf, sizeof pidbuf, "pgrep -x MainUI 2>/dev/null | head -1") != 0 ||
+        !pidbuf[0] || !isdigit((unsigned char)pidbuf[0]))
+        return;
+    int pid = atoi(pidbuf);
+    if (pid <= 0)
+        return;
+    snprintf(path, sizeof path, "/proc/%d/mem", pid);
+    int fd = open(path, O_WRONLY | O_CLOEXEC);
+    if (fd < 0)
+        return;
+    uint32_t v = val ? 1u : 0u;
+    (void)pwrite(fd, &v, sizeof v, (off_t)addr);
+    close(fd);
+}
+
+static void mainui_set_bt_state(int on)
+{
+    poke_mainui(MAINUI_BT_ENABLE, on);
+    poke_mainui(MAINUI_BT_OPENED, on);
+}
+
+static int wifi_state_get(void)
+{
+    int v = sval_get("wifi");
+    return (v == 0 || v == 1) ? v : 1;
+}
+
+static void wifi_state_set(int on)
+{
+    sval_set("wifi", on);
+    if (on) {
+        run_cmd("ifconfig wlan0 up >/dev/null 2>&1");
+        run_cmd("wpa_supplicant -B -D nl80211 -iwlan0 "
+                "-c /etc/wifi/wpa_supplicant.conf -O /etc/wifi/sockets >/dev/null 2>&1");
+        run_cmd("udhcpc -i wlan0 >/dev/null 2>&1 &");
+    } else {
+        run_cmd("ifconfig wlan0 down >/dev/null 2>&1");
+        run_cmd("killall -15 wpa_supplicant >/dev/null 2>&1");
+        run_cmd("killall -15 udhcpc >/dev/null 2>&1");
+    }
+    logm("wifi = %d", on);
+}
+
+static int bt_state_get(void)
+{
+    int v = sval_get("bluetooth");
+    if (v == 0 || v == 1)
+        return v;
+    return read_int_file(BT_RFKILL_STATE, 0) ? 1 : 0;
+}
+
+static void bt_state_set(int on)
+{
+    sval_set("bluetooth", on);
+    if (on) {
+        run_cmd("echo 1 > " BT_RFKILL_STATE " 2>/dev/null");
+        run_cmd("timeout 3 /etc/init.d/hciattach start >/dev/null 2>&1");
+        run_cmd("timeout 3 hciconfig hci0 up >/dev/null 2>&1");
+        run_cmd("timeout 3 /etc/bluetooth/bluetoothd start >/dev/null 2>&1");
+        run_cmd("timeout 3 /usr/bin/bluetoothctl power on </dev/null >/dev/null 2>&1 &");
+        run_cmd("/usr/trimui/bin/trimui_btmanager </dev/null >/dev/null 2>&1 &");
+        run_cmd("/usr/bin/bluealsa -p a2dp-source </dev/null >/dev/null 2>&1 &");
+        run_cmd("touch /tmp/bluetooth_ready 2>/dev/null");
+    } else {
+        run_cmd("timeout 1 sh -c 'echo switchoff > /tmp/bluetooth_request' >/dev/null 2>&1");
+        run_cmd("/etc/init.d/hciattach stop >/dev/null 2>&1");
+        run_cmd("rm -f /tmp/bluetooth_ready");
+        run_cmd("/etc/bluetooth/bluetoothd stop >/dev/null 2>&1");
+        run_cmd("killall -15 bluealsa >/dev/null 2>&1");
+        run_cmd("killall -9 trimui_btmanager >/dev/null 2>&1");
+        run_cmd("killall -9 bluetoothctl >/dev/null 2>&1");
+        run_cmd("echo 0 > " BT_RFKILL_STATE " 2>/dev/null");
+    }
+    mainui_set_bt_state(on);
+    logm("bluetooth = %d", on);
+}
+
+static void radio_toggle(int which)
+{
+    if (which == 0) {
+        g_wifi_on = !g_wifi_on;
+        wifi_state_set(g_wifi_on);
+    } else {
+        g_bt_on = !g_bt_on;
+        bt_state_set(g_bt_on);
+    }
+    g_dirty = 1;
+}
+
 static int clampi(int v, int lo, int hi)
 {
     return v < lo ? lo : (v > hi ? hi : v);
@@ -812,6 +935,9 @@ static void item_init_values(void)
     items[I_VOL].step = 5;
     items[I_BRI].step = 10;
     items[I_LEDBRI].step = 10;
+
+    g_wifi_on = wifi_state_get();
+    g_bt_on = bt_state_get();
 }
 
 /* The physical volume buttons are EV_KEY 114/115 on event0 and are handled by
@@ -919,7 +1045,7 @@ static void item_apply(int idx)
 #define PANEL_X      (SCR_W - PANEL_W - 32)
 #define PANEL_TOP    28
 #define PANEL_H      664
-#define ROW_H        37
+#define ROW_H        35
 #define ROW_TOP      (PANEL_TOP + 88)
 
 static void item_value_text(int idx, char *buf, size_t n)
@@ -1054,9 +1180,9 @@ static void compose(void)
                       focused ? 0xE62037 : 0x9698A2, 2);
             if (it->kind == IT_SLIDER) {
                 if (i == I_LEDCOLOR)
-                    draw_color_slider(px + 76, y + 27, PANEL_W - 104, it->value, focused);
+                    draw_color_slider(px + 76, y + 24, PANEL_W - 104, it->value, focused);
                 else
-                    draw_row_slider(px + 76, y + 27, PANEL_W - 104, it->value, focused);
+                    draw_row_slider(px + 76, y + 24, PANEL_W - 104, it->value, focused);
             }
         } else {
             draw_text(disabled ? "-" : (focused ? TR(S_ACCEPT) : ">"),
@@ -1065,8 +1191,34 @@ static void compose(void)
         }
     }
 
+    /* WiFi / Bluetooth: two circular buttons in a strip under the list.
+     * Green = on, grey = off; the focused one gets a wider highlight disc. */
+    {
+        int strip_top = ROW_TOP + NITEMS * ROW_H;
+        int cy = strip_top + 24;
+        int r = 20, step = 36;
+        int cxs[2] = { px + PANEL_W / 2 - step, px + PANEL_W / 2 + step };
+        int states[2] = { g_wifi_on, g_bt_on };
+        uint32_t glyphs[2] = { GL_WIFI, GL_BT };
+        const char *names[2] = { TR(S_WIFI), TR(S_BT) };
+        for (int k = 0; k < 2; k++) {
+            int focused = SEL_IS_RADIO(g_sel) && g_radio == k;
+            int on = states[k];
+            if (focused)
+                fill_circle_a(cxs[k], cy, r + 4, 0x2A2C36, 255);
+            fill_circle_a(cxs[k], cy, r, on ? 0x2ECC71 : 0x33353F, 255);
+            draw_icon(glyphs[k], cxs[k], cy,
+                      on ? 0x0B1A10 : (focused ? 0xF5F6FA : 0x9A9CA6), 255);
+            draw_text(names[k], cxs[k], cy + r + 3, g_f_small,
+                      focused ? 0xF5F6FA : 0x9698A2, 1);
+        }
+    }
+
     fill_round_a(px + 20, PANEL_TOP + PANEL_H - 46, PANEL_W - 40, 34, 10, 0x1A1B22, 255);
-    if (items[g_sel].kind == IT_SLIDER || items[g_sel].kind == IT_TOGGLE)
+    if (SEL_IS_RADIO(g_sel))
+        draw_text(TR(S_HINT_RADIO),
+                  px + PANEL_W / 2, PANEL_TOP + PANEL_H - 38, g_f_small, 0xB0B2BC, 1);
+    else if (items[g_sel].kind == IT_SLIDER || items[g_sel].kind == IT_TOGGLE)
         draw_text(TR(S_HINT_SLIDER),
                   px + PANEL_W / 2, PANEL_TOP + PANEL_H - 38, g_f_small, 0xB0B2BC, 1);
     else
@@ -1278,6 +1430,9 @@ static void config_activate(void)
         g_about = 1;
         return;
     case CFG_UPDATE:
+        /* The manifest can be edited while the app is open; re-read it so a
+         * dummy/rolled-back version is picked up without restarting. */
+        manifest_load(&g_manifest);
         upd_check();
         return;
     case CFG_LISTO:     do_close(EXIT_CLOSE); break;
@@ -1411,7 +1566,7 @@ static void update_compose(void)
     draw_text(TR(S_UPDATE_BACK), SCR_W / 2, 620, g_f_small, 0x9698A2, 1);
 }
 
-/* true when version a is newer than b ("0.0.2" or "v0.0.2" both accepted). */
+/* true when version a is newer than b ("0.0.3" or "v0.0.3" both accepted). */
 static int ver_newer(const char *a, const char *b)
 {
     int am = 0, an = 0, ap = 0, bm = 0, bn = 0, bp = 0;
@@ -1424,29 +1579,34 @@ static int ver_newer(const char *a, const char *b)
     return ap > bp;
 }
 
-/* updater.sh prints "OK <tag>" or "ERR <code>" on a single line. */
-static void upd_run(const char *op)
+/* updater.sh prints "OK <tag>" or "ERR <code>" on a single line. `arg` is the
+ * release tag for install (the version currently running for check). */
+static void upd_run(const char *op, const char *arg)
 {
     char out[256] = "";
     char cmd[512];
     snprintf(cmd, sizeof cmd,
              "GITHUB_OWNER=%s GITHUB_REPO=%s sh " APP_DIR "/%s %s %s 2>/dev/null",
-             g_manifest.owner, g_manifest.repo, g_manifest.updater,
-             op, g_manifest.version);
+             g_manifest.owner, g_manifest.repo, g_manifest.updater, op, arg);
     if (read_cmd(out, sizeof out, "%s", cmd) != 0) {
+        logm("updater %s %s: no output", op, arg);
         g_upd_state = UPD_ERROR;
         return;
     }
-    char res[16] = "", arg[64] = "";
-    if (sscanf(out, "%15s %63s", res, arg) < 1 || strcmp(res, "OK")) {
+    char res[16] = "", got[64] = "";
+    if (sscanf(out, "%15s %63s", res, got) < 1 || strcmp(res, "OK")) {
+        logm("updater %s %s: %s", op, arg, out);
         g_upd_state = UPD_ERROR;
         return;
     }
+    logm("updater %s %s: OK %s", op, arg, got);
     if (!strcmp(op, "check")) {
-        snprintf(g_upd_latest, sizeof g_upd_latest, "%s", arg);
+        snprintf(g_upd_latest, sizeof g_upd_latest, "%s", got);
         g_upd_state = ver_newer(g_upd_latest, g_manifest.version) ? UPD_AVAILABLE
                                                            : UPD_UPTODATE;
     } else {
+        /* The zip replaced manifest.json on disk; pick up the new version. */
+        manifest_load(&g_manifest);
         g_upd_state = UPD_INSTALLED;
     }
 }
@@ -1458,7 +1618,7 @@ static void upd_check(void)
     g_dirty = 1;
     config_compose();
     fb_flip();
-    upd_run("check");
+    upd_run("check", g_manifest.version);
     g_dirty = 1;
 }
 
@@ -1468,7 +1628,7 @@ static void upd_install(void)
     g_dirty = 1;
     config_compose();
     fb_flip();
-    upd_run("install");
+    upd_run("install", g_upd_latest);
     g_dirty = 1;
 }
 
@@ -1603,7 +1763,7 @@ static void do_exit_game(void)
     g_quit = 1;
 }
 
-static void move_sel(int d) { g_sel = (g_sel + d + NITEMS) % NITEMS; }
+static void move_sel(int d) { g_sel = (g_sel + d + NSEL) % NSEL; }
 
 static void adjust_value(int d)
 {
@@ -1641,7 +1801,9 @@ static void horiz_move(int dir)
     if (g_mode_cfg)
         cfg_move(dir);
     else if (!g_confirm) {
-        if (items[g_sel].kind == IT_SLIDER || items[g_sel].kind == IT_TOGGLE)
+        if (SEL_IS_RADIO(g_sel))
+            g_radio = (dir < 0) ? 0 : 1; /* left = WiFi, right = Bluetooth */
+        else if (items[g_sel].kind == IT_SLIDER || items[g_sel].kind == IT_TOGGLE)
             adjust_value(dir);
         else
             move_sel(dir);
@@ -1683,8 +1845,6 @@ static void stick_eval(void)
 
 static void activate(void)
 {
-    item_t *it = &items[g_sel];
-
     if (g_confirm) {
         int act = g_confirm;
         g_confirm = ACT_NONE;
@@ -1697,6 +1857,12 @@ static void activate(void)
         }
         return;
     }
+    if (SEL_IS_RADIO(g_sel)) {
+        radio_toggle(g_radio);
+        return;
+    }
+
+    item_t *it = &items[g_sel];
     if (it->kind == IT_SLIDER)
         return; /* sliders are changed directly with < > */
     if (it->kind == IT_TOGGLE) {
@@ -1843,6 +2009,7 @@ int main(int argc, char **argv)
     long last_clock = 0;
     long last_refresh = 0;
     long last_bl_refresh = 0;
+    long last_radio_refresh = 0;
 
     g_open_at = now_ms();
     g_anim_start = g_open_at;
@@ -2009,6 +2176,15 @@ int main(int argc, char **argv)
         if (!g_mode_cfg && !g_closing && now - last_bl_refresh > 1000) {
             last_bl_refresh = now;
             item_refresh_brightness();
+        }
+        if (!g_mode_cfg && !g_closing && now - last_radio_refresh > 2000) {
+            int w = wifi_state_get(), b = bt_state_get();
+            last_radio_refresh = now;
+            if (w != g_wifi_on || b != g_bt_on) {
+                g_wifi_on = w;
+                g_bt_on = b;
+                g_dirty = 1;
+            }
         }
         if (!g_mode_cfg && (g_closing || now - g_anim_start < ANIM_MS))
             g_dirty = 1;

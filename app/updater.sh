@@ -62,7 +62,25 @@ cmd_install() {
     fi
 
     src="$TMP/OverLyder"
+
+    # Zips built with Windows Compress-Archive store entries as
+    # "OverLyder\\bin\\overlayd" (backslashes are part of the filename), so
+    # unzip drops them in the root instead of creating OverLyder/. Normalize
+    # that layout before looking for the app folder.
+    if [ ! -d "$src" ]; then
+        mkdir -p "$src" || { echo "ERR layout"; rm -rf "$TMP"; return; }
+        for f in "$TMP"/*; do
+            [ -f "$f" ] || continue
+            [ "$f" = "$TMP/OverLyder.zip" ] && continue
+            rel=$(basename "$f" | sed 's|\\|/|g; s|^OverLyder/||')
+            [ -n "$rel" ] || continue
+            mkdir -p "$src/$(dirname "$rel")" 2>/dev/null
+            mv "$f" "$src/$rel" 2>/dev/null
+        done
+    fi
+
     [ -d "$src" ] || { echo "ERR layout"; rm -rf "$TMP"; return; }
+    [ -f "$src/manifest.json" ] || { echo "ERR layout"; rm -rf "$TMP"; return; }
 
     # The daemon must not keep old inodes alive while we replace its binaries.
     if [ -x "$APP/overlayctl" ]; then
@@ -78,6 +96,13 @@ cmd_install() {
         cp -f "$src/$f" "$APP/$f" 2>/dev/null || { echo "ERR copy"; rm -rf "$TMP"; return; }
     done
     chmod 755 "$APP/launch.sh" "$APP/overlayctl" "$APP/bin/overlayd" "$APP/bin/overlay_ui" 2>/dev/null
+
+    # A release zip can ship a stale manifest (the 0.0.3 asset had 0.0.2
+    # inside). Trust the tag we were asked to install, not the zip's copy.
+    mf="$APP/manifest.json"
+    if [ -f "$mf" ]; then
+        sed -i "s|\"version\"[[:space:]]*:[[:space:]]*\"[^\"]*\"|\"version\": \"$tag\"|" "$mf" 2>/dev/null
+    fi
     sync
 
     if [ -x "$APP/overlayctl" ]; then

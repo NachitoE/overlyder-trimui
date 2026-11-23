@@ -155,7 +155,9 @@ static void json_string(const char *json, const char *key, char *out, size_t n)
 void manifest_load(app_manifest *m)
 {
     memset(m, 0, sizeof *m);
-    snprintf(m->version, sizeof m->version, "0.0.4");
+    /* Everything comes from manifest.json: it is the single file to edit when
+     * bumping the version. This is only a placeholder for a missing manifest. */
+    snprintf(m->version, sizeof m->version, "0.0.0");
     snprintf(m->owner, sizeof m->owner, "NachitoE");
     snprintf(m->repo, sizeof m->repo, "overlyder-trimui");
     snprintf(m->updater, sizeof m->updater, "updater.sh");
@@ -188,6 +190,7 @@ void cfg_defaults(overlay_cfg *c)
     c->lang = 0; /* Spanish by default */
     c->led_color = 0xFFFFFF;
     c->led_color_set = 0; /* do not override CrossMix LED presets by default */
+    c->upd_reinstall = 0; /* never reinstall the same version unless asked */
 }
 
 static void trim(char *s)
@@ -257,6 +260,8 @@ int cfg_load(overlay_cfg *c)
                 c->lang = 2;
             else if (!strcasecmp(v, "es") || !strcmp(v, "0"))
                 c->lang = 0;
+        } else if (!strcasecmp(k, "upd_reinstall")) {
+            c->upd_reinstall = atoi(v) ? 1 : 0;
         } else if (!strcasecmp(k, "ledcolor")) {
             const char *hex = v;
             if (*hex == '#')
@@ -312,21 +317,16 @@ void led_color_apply(uint32_t rgb)
     write_int_file(LED_SYS "effect_lr", 4); /* static: latches hex, no animation */
 }
 
-/* Persist the color in overlay.cfg without touching the other settings (the
- * config screen rewrites the whole file on its own). When enabled is 0 the
- * ledcolor line is removed, so the daemon leaves CrossMix's LED preset alone
- * at boot. */
-void cfg_update_led_color(overlay_cfg *c, uint32_t rgb, int enabled)
+/* Rewrite a single setting in overlay.cfg, leaving every other key untouched
+ * (the config screen rewrites the whole file on its own). */
+static void cfg_set_line(const char *drop1, const char *drop2, const char *line)
 {
-    c->led_color = rgb & 0xFFFFFF;
-    c->led_color_set = enabled ? 1 : 0;
-
     char lines[64][256];
     int n = 0;
     FILE *f = fopen(CFG_PATH, "r");
     if (!f) {
-        /* Fresh install: still write the LED settings so the daemon can pick
-         * them up and other keys fall back to their defaults. */
+        /* Fresh install: still write the setting so the daemon can pick it up
+         * and other keys fall back to their defaults. */
         snprintf(lines[n++], sizeof lines[0], "# OverLyder configuration\n");
     } else
     while (n < 64 && fgets(lines[n], sizeof lines[0], f)) {
@@ -338,8 +338,8 @@ void cfg_update_led_color(overlay_cfg *c, uint32_t rgb, int enabled)
             char *k = key;
             while (*k && isspace((unsigned char)*k))
                 k++;
-            if (!strcasecmp(k, "ledcolor") || !strcasecmp(k, "ledmode"))
-                continue; /* drop old values (ledmode is obsolete) */
+            if (!strcasecmp(k, drop1) || (drop2 && !strcasecmp(k, drop2)))
+                continue;
         }
         n++;
     }
@@ -351,9 +351,32 @@ void cfg_update_led_color(overlay_cfg *c, uint32_t rgb, int enabled)
         return;
     for (int i = 0; i < n; i++)
         fputs(lines[i], out);
-    if (enabled)
-        fprintf(out, "ledcolor=%06X\n", c->led_color);
+    if (line && *line)
+        fputs(line, out);
     fclose(out);
     if (rename(CFG_PATH ".tmp", CFG_PATH) == 0)
         sync();
+}
+
+/* Persist the color in overlay.cfg. When disabled the line is removed, so the
+ * daemon leaves CrossMix's LED preset alone at boot. */
+void cfg_update_led_color(overlay_cfg *c, uint32_t rgb, int enabled)
+{
+    c->led_color = rgb & 0xFFFFFF;
+    c->led_color_set = enabled ? 1 : 0;
+
+    char line[64] = "";
+    if (enabled)
+        snprintf(line, sizeof line, "ledcolor=%06X\n", c->led_color);
+    cfg_set_line("ledcolor", "ledmode", line); /* ledmode is obsolete */
+}
+
+/* Persist the updater's "reinstall same version" switch. */
+void cfg_update_reinstall(overlay_cfg *c, int enabled)
+{
+    c->upd_reinstall = enabled ? 1 : 0;
+
+    char line[64];
+    snprintf(line, sizeof line, "upd_reinstall=%d\n", c->upd_reinstall);
+    cfg_set_line("upd_reinstall", NULL, line);
 }

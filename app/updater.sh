@@ -8,11 +8,21 @@
 # version, owner and repo come from manifest.json (read by overlay_ui.c); this
 # script only reports what GitHub publishes and performs the install when asked.
 
-OWNER="${GITHUB_OWNER:-NachitoE}"
-REPO="${GITHUB_REPO:-overlyder-trimui}"
-API="https://api.github.com/repos/$OWNER/$REPO/releases/latest"
 APP="${OVERLYDER_APP:-/mnt/SDCARD/Apps/OverLyder}"
+MF="${OVERLYDER_MANIFEST:-$APP/manifest.json}"
 TMP="${OVERLYDER_TMP:-/tmp/overlyder-update}"
+
+# Everything about the app (version, owner, repo, updater script) lives in
+# manifest.json. Environment variables still win, for testing from a PC.
+json_val() {
+    [ -f "$MF" ] || return 1
+    sed -n "s/.*\"$1\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" "$MF" | head -n 1
+}
+OWNER="${GITHUB_OWNER:-$(json_val owner)}"
+OWNER="${OWNER:-NachitoE}"
+REPO="${GITHUB_REPO:-$(json_val repo)}"
+REPO="${REPO:-overlyder-trimui}"
+API="https://api.github.com/repos/$OWNER/$REPO/releases/latest"
 
 # -k / --no-check-certificate: CrossMix images often ship without a current CA
 # bundle, which otherwise breaks HTTPS requests to api.github.com.
@@ -44,9 +54,25 @@ cmd_check() {
     echo "OK $tag"
 }
 
+# "v0.0.4" and "0.0.4" name the same release.
+ver_plain() {
+    printf '%s' "$1" | sed 's/^[vV]//'
+}
+
 cmd_install() {
     tag="$1"
+    allow_same="${2:-0}"
     [ -n "$tag" ] || { echo "ERR notag"; return; }
+
+    # Without the option enabled, a release equal to the installed one is not
+    # an update: refuse it here too, not just in the UI.
+    if [ "$allow_same" != "1" ]; then
+        cur_ver=$(json_val version)
+        if [ -n "$cur_ver" ] && [ "$(ver_plain "$cur_ver")" = "$(ver_plain "$tag")" ]; then
+            echo "ERR same"
+            return
+        fi
+    fi
 
     url="https://github.com/$OWNER/$REPO/releases/download/$tag/OverLyder.zip"
     rm -rf "$TMP" 2>/dev/null
@@ -114,7 +140,7 @@ cmd_install() {
 
 case "$1" in
     check)   cmd_check "$2" ;;
-    install) cmd_install "$2" ;;
+    install) cmd_install "$2" "$3" ;;
     *)       echo "ERR usage" ;;
 esac
 exit 0

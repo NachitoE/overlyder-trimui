@@ -76,11 +76,13 @@ typedef struct {
     int lang;         /* 0 = Spanish, 1 = English, 2 = Portuguese */
     uint32_t led_color;   /* 0xRRGGBB static LED color */
     int led_color_set;    /* 1 = a color was configured */
+    int upd_reinstall;    /* 1 = allow reinstalling the installed version */
 } overlay_cfg;
 
 void cfg_defaults(overlay_cfg *c);
 int  cfg_load(overlay_cfg *c);
 void cfg_update_led_color(overlay_cfg *c, uint32_t rgb, int enabled);
+void cfg_update_reinstall(overlay_cfg *c, int enabled);
 uint32_t led_hue_rgb(int hue);
 void led_color_apply(uint32_t rgb);
 

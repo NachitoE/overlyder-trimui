@@ -173,9 +173,12 @@ static app_manifest g_manifest;
 /* Self-updater state (CrossMix config app only). */
 enum {
     UPD_NONE = 0, UPD_CHECKING, UPD_UPTODATE, UPD_AVAILABLE, UPD_CONFIRM,
-    UPD_INSTALLING, UPD_INSTALLED, UPD_ERROR
+    UPD_INSTALLING, UPD_INSTALLED, UPD_ERROR, UPD_OPTIONS
 };
 static int g_upd_state = UPD_NONE;
+static int g_upd_prev_state = UPD_UPTODATE; /* state behind the options submenu */
+static int g_upd_same = 0;                  /* remote tag == installed version */
+static int g_upd_opt_sel = 0;               /* 0 = reinstall switch, 1 = back */
 static char g_upd_latest[32] = "";
 
 static void update_compose(void);
@@ -219,7 +222,9 @@ enum {
     S_UPDATE, S_UPDATE_TITLE, S_UPDATE_LOCAL, S_UPDATE_LATEST,
     S_UPDATE_CHECKING, S_UPDATE_UPTODATE, S_UPDATE_AVAILABLE, S_UPDATE_ERROR,
     S_UPDATE_CONFIRM, S_UPDATE_INSTALLING, S_UPDATE_INSTALLED, S_UPDATE_BACK,
-    S_WIFI, S_BT, S_HINT_RADIO, S_COUNT
+    S_WIFI, S_BT, S_HINT_RADIO,
+    S_UPDATE_OPTIONS, S_UPDATE_REINSTALL, S_UPDATE_HINT, S_UPDATE_BACK_ROW,
+    S_UPDATE_OPTIONS_HINT, S_UPDATE_SAME_AVAIL, S_UPDATE_SAME_CONFIRM, S_COUNT
 };
 
 static const char *const g_tr[NLANG][S_COUNT] = {
@@ -247,6 +252,9 @@ static const char *const g_tr[NLANG][S_COUNT] = {
         "No se pudo consultar", "A: Instalar   B: Cancelar", "Instalando...",
         "Instalado. Reinicia la app", "B: Volver",
         "WiFi", "Bluetooth", "^ v: Menu   < >: Elegir   A: Cambiar",
+        "Opciones", "Reinstalar versión actual", "SELECT: Opciones", "Volver",
+        "^ v / < >: Elegir   A: Cambiar   B: Volver",
+        "Misma versión: reinstalar disponible", "A: Reinstalar   B: Cancelar",
     },
     { /* English */
         "SETTINGS", "HOME / B: close",
@@ -272,6 +280,9 @@ static const char *const g_tr[NLANG][S_COUNT] = {
         "Could not check", "A: Install   B: Cancel", "Installing...",
         "Installed. Restart the app", "B: Back",
         "Wi-Fi", "Bluetooth", "^ v: Menu   < >: Select   A: Toggle",
+        "Options", "Reinstall current version", "SELECT: Options", "Back",
+        "^ v / < >: Select   A: Change   B: Back",
+        "Same version: reinstall available", "A: Reinstall   B: Cancel",
     },
     { /* Portuguese */
         "AJUSTES", "HOME / B: fechar",
@@ -297,6 +308,9 @@ static const char *const g_tr[NLANG][S_COUNT] = {
         "Não foi possível verificar", "A: Instalar   B: Cancelar", "Instalando...",
         "Instalado. Reinicie o app", "B: Voltar",
         "Wi-Fi", "Bluetooth", "^ v: Menu   < >: Escolher   A: Alternar",
+        "Opções", "Reinstalar versão atual", "SELECT: Opções", "Voltar",
+        "^ v / < >: Escolher   A: Alterar   B: Voltar",
+        "Mesma versão: reinstalar disponível", "A: Reinstalar   B: Cancelar",
     },
 };
 
@@ -1351,6 +1365,7 @@ static void config_save(void)
         fprintf(f, "step=%d\n", g_cfg.step);
         fprintf(f, "confirm_exit=%d\n", g_cfg_confirm ? 1 : 0);
         fprintf(f, "lang=%s\n", g_lang == LANG_EN ? "en" : (g_lang == LANG_PT ? "pt" : "es"));
+        fprintf(f, "upd_reinstall=%d\n", g_cfg.upd_reinstall ? 1 : 0);
         if (g_cfg.led_color_set)
             fprintf(f, "ledcolor=%06X\n", g_cfg.led_color);
         fclose(f);
@@ -1531,6 +1546,25 @@ static void update_compose(void)
 {
     draw_text(TR(S_UPDATE_TITLE), SCR_W / 2, 130, g_f_mid, 0xE62037, 1);
 
+    if (g_upd_state == UPD_OPTIONS) {
+        draw_text(TR(S_UPDATE_OPTIONS), SCR_W / 2, 210, g_f_mid, 0xF0F2F8, 1);
+        const char *lbl[2] = { TR(S_UPDATE_REINSTALL), TR(S_UPDATE_BACK_ROW) };
+        const char *val[2] = {
+            g_cfg.upd_reinstall ? TR(S_ON) : TR(S_OFF), ""
+        };
+        for (int i = 0; i < 2; i++) {
+            int y = 300 + i * 60;
+            int focused = (i == g_upd_opt_sel);
+            fill_round_a(220, y, SCR_W - 440, 44, 10,
+                         focused ? 0xE62037 : 0x1A1B22, focused ? 255 : 235);
+            draw_text(lbl[i], 260, y + 6, g_f_mid,
+                      focused ? 0xFFFFFF : 0xBCBEC8, 0);
+            draw_text(val[i], SCR_W - 260, y + 6, g_f_mid, 0xF0F2F8, 2);
+        }
+        draw_text(TR(S_UPDATE_OPTIONS_HINT), SCR_W / 2, 620, g_f_small, 0x9698A2, 1);
+        return;
+    }
+
     if (g_upd_state == UPD_CHECKING) {
         draw_text(TR(S_UPDATE_CHECKING), SCR_W / 2, 300, g_f_mid, 0xF0F2F8, 1);
         return;
@@ -1553,7 +1587,8 @@ static void update_compose(void)
     switch (g_upd_state) {
     case UPD_UPTODATE:  msg = TR(S_UPDATE_UPTODATE); break;
     case UPD_AVAILABLE:
-    case UPD_CONFIRM:   msg = TR(S_UPDATE_AVAILABLE); break;
+    case UPD_CONFIRM:   msg = g_upd_same ? TR(S_UPDATE_SAME_AVAIL)
+                                         : TR(S_UPDATE_AVAILABLE); break;
     case UPD_INSTALLED: msg = TR(S_UPDATE_INSTALLED); break;
     case UPD_ERROR:     msg = TR(S_UPDATE_ERROR); color = 0xE62037; break;
     default: break;
@@ -1562,21 +1597,76 @@ static void update_compose(void)
         draw_text(msg, SCR_W / 2, 380, g_f_mid, color, 1);
 
     if (g_upd_state == UPD_AVAILABLE)
-        draw_text(TR(S_UPDATE_CONFIRM), SCR_W / 2, 470, g_f_small, 0x9698A2, 1);
+        draw_text(g_upd_same ? TR(S_UPDATE_SAME_CONFIRM) : TR(S_UPDATE_CONFIRM),
+                  SCR_W / 2, 470, g_f_small, 0x9698A2, 1);
+    draw_text(TR(S_UPDATE_HINT), SCR_W / 2, 540, g_f_small, 0x9698A2, 1);
     draw_text(TR(S_UPDATE_BACK), SCR_W / 2, 620, g_f_small, 0x9698A2, 1);
 }
 
-/* true when version a is newer than b ("0.0.3" or "v0.0.3" both accepted). */
+/* Numeric parts of "0.0.3" or "v0.0.3", so release tags and the manifest
+ * version are compared the same way. */
+static void ver_parts(const char *s, int *maj, int *min, int *pat)
+{
+    if (*s == 'v' || *s == 'V')
+        s++;
+    *maj = *min = *pat = 0;
+    sscanf(s, "%d.%d.%d", maj, min, pat);
+}
+
 static int ver_newer(const char *a, const char *b)
 {
-    int am = 0, an = 0, ap = 0, bm = 0, bn = 0, bp = 0;
-    if (*a == 'v' || *a == 'V') a++;
-    if (*b == 'v' || *b == 'V') b++;
-    sscanf(a, "%d.%d.%d", &am, &an, &ap);
-    sscanf(b, "%d.%d.%d", &bm, &bn, &bp);
+    int am, an, ap, bm, bn, bp;
+    ver_parts(a, &am, &an, &ap);
+    ver_parts(b, &bm, &bn, &bp);
     if (am != bm) return am > bm;
     if (an != bn) return an > bn;
     return ap > bp;
+}
+
+static int ver_equal(const char *a, const char *b)
+{
+    int am, an, ap, bm, bn, bp;
+    ver_parts(a, &am, &an, &ap);
+    ver_parts(b, &bm, &bn, &bp);
+    return am == bm && an == bn && ap == bp;
+}
+
+/* Decide what the updater offers from the last check. A release equal to the
+ * installed one only offers a reinstall when that option is turned on. */
+static void upd_recompute(void)
+{
+    if (!g_upd_latest[0]) {
+        g_upd_state = UPD_UPTODATE;
+        return;
+    }
+    g_upd_same = ver_equal(g_upd_latest, g_manifest.version);
+    g_upd_state = (ver_newer(g_upd_latest, g_manifest.version) ||
+                   (g_cfg.upd_reinstall && g_upd_same))
+                      ? UPD_AVAILABLE : UPD_UPTODATE;
+}
+
+static void upd_options_open(void)
+{
+    g_upd_prev_state = g_upd_state;
+    g_upd_opt_sel = 0;
+    g_upd_state = UPD_OPTIONS;
+    g_dirty = 1;
+}
+
+static void upd_options_back(void)
+{
+    if (g_upd_prev_state == UPD_UPTODATE || g_upd_prev_state == UPD_AVAILABLE)
+        upd_recompute();
+    else
+        g_upd_state = g_upd_prev_state;
+    g_dirty = 1;
+}
+
+static void upd_option_toggle(void)
+{
+    if (g_upd_opt_sel == 0)
+        cfg_update_reinstall(&g_cfg, !g_cfg.upd_reinstall);
+    g_dirty = 1;
 }
 
 /* updater.sh prints "OK <tag>" or "ERR <code>" on a single line. `arg` is the
@@ -1585,9 +1675,12 @@ static void upd_run(const char *op, const char *arg)
 {
     char out[256] = "";
     char cmd[512];
+    /* Last argument tells updater.sh whether reinstalling the same version
+     * is allowed; check ignores it. */
     snprintf(cmd, sizeof cmd,
-             "GITHUB_OWNER=%s GITHUB_REPO=%s sh " APP_DIR "/%s %s %s 2>/dev/null",
-             g_manifest.owner, g_manifest.repo, g_manifest.updater, op, arg);
+             "GITHUB_OWNER=%s GITHUB_REPO=%s sh " APP_DIR "/%s %s %s %s 2>/dev/null",
+             g_manifest.owner, g_manifest.repo, g_manifest.updater, op, arg,
+             g_cfg.upd_reinstall ? "1" : "0");
     if (read_cmd(out, sizeof out, "%s", cmd) != 0) {
         logm("updater %s %s: no output", op, arg);
         g_upd_state = UPD_ERROR;
@@ -1602,8 +1695,7 @@ static void upd_run(const char *op, const char *arg)
     logm("updater %s %s: OK %s", op, arg, got);
     if (!strcmp(op, "check")) {
         snprintf(g_upd_latest, sizeof g_upd_latest, "%s", got);
-        g_upd_state = ver_newer(g_upd_latest, g_manifest.version) ? UPD_AVAILABLE
-                                                           : UPD_UPTODATE;
+        upd_recompute();
     } else {
         /* The zip replaced manifest.json on disk; pick up the new version. */
         manifest_load(&g_manifest);
@@ -1798,6 +1890,13 @@ static void horiz_move(int dir)
 {
     if (g_mode_cfg && (g_learning || g_about))
         return;
+    if (g_mode_cfg && g_upd_state == UPD_OPTIONS) {
+        if (g_upd_opt_sel == 0 && dir)
+            upd_option_toggle();
+        return;
+    }
+    if (g_mode_cfg && g_upd_state != UPD_NONE)
+        return; /* no invisible config cursor movement behind the updater */
     if (g_mode_cfg)
         cfg_move(dir);
     else if (!g_confirm) {
@@ -1813,6 +1912,12 @@ static void horiz_move(int dir)
 static void vert_move(int dir)
 {
     if (g_mode_cfg && (g_learning || g_about))
+        return;
+    if (g_mode_cfg && g_upd_state == UPD_OPTIONS) {
+        g_upd_opt_sel = (g_upd_opt_sel + (dir > 0 ? 1 : -1) + 2) % 2;
+        return;
+    }
+    if (g_mode_cfg && g_upd_state != UPD_NONE)
         return;
     if (g_mode_cfg)
         cfg_move(dir);
@@ -2049,11 +2154,19 @@ int main(int argc, char **argv)
                         } else if (!g_mode_cfg && now_ms() - g_open_at < 300) {
                             /* ignore events queued from the opening gesture */
                         } else if (g_mode_cfg && g_upd_state != UPD_NONE) {
-                            if (g_upd_state == UPD_CHECKING ||
-                                g_upd_state == UPD_INSTALLING) {
+                            if (g_upd_state == UPD_OPTIONS) {
+                                if (e->code == K_A)
+                                    upd_option_toggle();
+                                if (g_upd_opt_sel == 1 || e->code == K_B ||
+                                    e->code == K_MODE || e->code == K_START ||
+                                    e->code == K_SELECT)
+                                    upd_options_back();
+                            } else if (g_upd_state == UPD_CHECKING ||
+                                       g_upd_state == UPD_INSTALLING) {
                                 /* network/install in progress: ignore input */
-                            } else if (e->code == K_B || e->code == K_MODE ||
-                                       e->code == K_START || e->code == K_SELECT) {
+                            } else if (e->code == K_START || e->code == K_SELECT) {
+                                upd_options_open();
+                            } else if (e->code == K_B || e->code == K_MODE) {
                                 if (g_upd_state == UPD_CONFIRM)
                                     g_upd_state = UPD_AVAILABLE; /* cancel install */
                                 else

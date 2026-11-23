@@ -296,26 +296,20 @@ uint32_t led_hue_rgb(int hue)
 }
 
 /* ------------------------------------------------------------------ */
-/* Change only the stick rings' target color, keeping the active profile.
- * The driver latches a new effect_rgb_hex only when the effect is (re)written,
- * so we briefly select static (4) and immediately restore the previous
- * effect. Cycles, duration, the center LED and effect_enable are untouched.
- * "lr" is the combined left+right stick zone (same one System Tools writes). */
+/* Set the stick rings to a fixed color. The driver latches a new
+ * effect_rgb_hex only when the effect is (re)written, so writing 4 again is
+ * enough even when it is already static. It must stay on static: restoring the
+ * previous effect (usually 1 = linear) re-enables the animation and the rings
+ * start pulsing/cycling back to the firmware's default color instead of
+ * holding the one we chose. Cycles, duration, the center LED and effect_enable
+ * are untouched. "lr" is the combined left+right stick zone (same one System
+ * Tools writes). */
 void led_color_apply(uint32_t rgb)
 {
     char hex[16];
     snprintf(hex, sizeof hex, "%06X ", rgb & 0xFFFFFF);
     write_str_file(LED_SYS "effect_rgb_hex_lr", hex);
-
-    int effect = read_int_file(LED_SYS "effect_lr", 4);
-    if (effect == 4) {
-        /* Already static: a 0 -> 4 edge is what makes it re-latch the color. */
-        write_int_file(LED_SYS "effect_lr", 0);
-        write_int_file(LED_SYS "effect_lr", 4);
-    } else {
-        write_int_file(LED_SYS "effect_lr", 4);
-        write_int_file(LED_SYS "effect_lr", effect);
-    }
+    write_int_file(LED_SYS "effect_lr", 4); /* static: latches hex, no animation */
 }
 
 /* Persist the color in overlay.cfg without touching the other settings (the

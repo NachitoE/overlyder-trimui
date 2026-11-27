@@ -67,13 +67,16 @@ Keys are injected through a virtual keyboard device created at daemon startup, s
 The panel and keyboard are drawn on their own alpha-blended hardware display
 layer, so the game keeps running and nothing fights over `/dev/fb0` (no
 SIGSTOP flicker). If no free layer is available, OverLyder falls back to the
-old freeze-the-game behaviour. The last typed text is also saved to
-`/tmp/overlyder.keyboard.txt`.
+old freeze-the-game behaviour. Even in that SIGSTOP mode, opening the keyboard
+resumes the game and switches the overlay to a hardware layer for as long as
+the keyboard/overlay is up, so typing is live. The last typed text is also
+saved to `/tmp/overlyder.keyboard.txt`.
 
 ### SIGSTOP or no SIGSTOP
 
-Both modes ship in the same binaries. You can switch with the **SIGSTOP** row
-in the app's settings screen: **Sí** freezes the game while the panel is up,
+Both modes ship in the same binaries. You can switch with the
+**Pause game when overlay opens (SIGSTOP)** row in the app's settings screen
+(**Pausar juego al abrir overlay (SIGSTOP)** in Spanish): **Sí** freezes the game while the panel is up,
 **No** keeps it running on a hardware layer. (Internally this is `no_sigstop`
 in `/mnt/SDCARD/System/etc/overlay.cfg`):
 

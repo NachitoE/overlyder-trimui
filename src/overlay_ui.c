@@ -1541,9 +1541,39 @@ static void kb_key(int code)
     }
 }
 
+/* If the overlay was using SIGSTOP, thaw the game for the keyboard session
+ * and move our drawing to a hardware layer so both can render at once. */
+static void kb_release_game(void)
+{
+    FILE *f = fopen(STOPPED_FILE, "r");
+    if (f) {
+        int pid;
+        while (fscanf(f, "%d", &pid) == 1) {
+            kill(pid, SIGCONT);
+            logm("keyboard resumed pid %d", pid);
+        }
+        fclose(f);
+        unlink(STOPPED_FILE);
+    }
+    if (!g_use_layer) {
+        if (overlay_layer_open(&g_layer, SCR_W, SCR_H) == 0) {
+            g_use_layer = 1;
+            overlay_layer_show(&g_layer);
+            FILE *flag = fopen(LAYER_FLAG, "w");
+            if (flag) {
+                fprintf(flag, "%d %u\n", (int)getpid(), g_layer.channel);
+                fclose(flag);
+            }
+        } else {
+            logm("keyboard could not claim a layer; game still resumed");
+        }
+    }
+}
+
 static void kb_open(void)
 {
     logm("keyboard opened");
+    kb_release_game();
     g_kb_open = 1;
     g_kb_open_at = now_ms();
     g_kb_row = 0;

@@ -81,7 +81,7 @@
   "S_KB_HINT": "^ v / < >: Mover   A: Escribir   B: Volver   Y: Mayús   X: 123   START: Intro   SELECT: Borrar",
   "S_KB_EMPTY": "Escribe aquí...",
   "S_KB_UNAVAILABLE": "Teclado del sistema no disponible",
-  "S_CFG_SIGSTOP": "SIGSTOP",
+  "S_CFG_SIGSTOP": "Pausar juego al abrir overlay (SIGSTOP)",
   "S_CFG_KBMODE": "Modo del teclado",
   "S_KB_FULL": "Completo",
   "S_KB_COMPACT": "Compacto",

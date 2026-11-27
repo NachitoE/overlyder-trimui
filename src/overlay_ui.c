@@ -140,7 +140,7 @@ static int g_text_to_gamepad = 0;       /* OVERLAY_TEXT_TO_GAMEPAD=1 */
 enum {
     CFG_ESTADO = 0, CFG_GATILLO,
     CFG_K1, CFG_K2, CFG_K3, CFG_K4,
-    CFG_UMBRAL, CFG_CONFIRMAR, CFG_IDIOMA,
+    CFG_UMBRAL, CFG_CONFIRMAR, CFG_IDIOMA, CFG_SIGSTOP,
     CFG_LEARN, CFG_RESET, CFG_ABOUT, CFG_UPDATE, CFG_LISTO, NCFG
 };
 
@@ -184,6 +184,7 @@ static int g_cfg_enabled = 1;
 static int g_cfg_preset = 0;
 static int g_cfg_hold = 1;
 static int g_cfg_confirm = 1;
+static int g_cfg_sigstop = 1;  /* 1 = hardware layer, 0 = SIGSTOP */
 static int g_custom[4] = { 1, 0, 0, 0 }; /* indices into g_keys */
 static int g_learning = 0;
 static int g_learn_mask = 0;
@@ -248,110 +249,80 @@ enum {
     S_WIFI, S_BT, S_HINT_RADIO,
     S_UPDATE_OPTIONS, S_UPDATE_REINSTALL, S_UPDATE_HINT, S_UPDATE_BACK_ROW,
     S_UPDATE_OPTIONS_HINT, S_UPDATE_SAME_AVAIL, S_UPDATE_SAME_CONFIRM,
-    S_KB_TITLE, S_KB_HINT, S_KB_EMPTY, S_KB_UNAVAILABLE, S_COUNT
+    S_KB_TITLE, S_KB_HINT, S_KB_EMPTY, S_KB_UNAVAILABLE, S_CFG_SIGSTOP, S_COUNT
 };
 
-static const char *const g_tr[NLANG][S_COUNT] = {
-    { /* Spanish */
-        "AJUSTES", "HOME / B: cerrar",
-        "Volumen", "Brillo", "Contraste", "Exposición", "Saturación", "Temperatura",
-        "Continuar", "Salir juego", "Reiniciar", "Apagar", "Teclado",
-        "A: Aceptar", "no disponible",
-        "^ v: Elegir   < >: Ajustar   B: Cerrar",
-        "^ v / < >: Elegir   A: Aceptar   B: Cerrar",
-        "^ v / < >: Elegir   A: Abrir teclado   B: Cerrar",
-        "Salir del juego?", "Reiniciar el dispositivo?", "Apagar el dispositivo?",
-        "A: Si      B: No", "Saliendo del juego...",
-        "Ajustes del overlay", "Estado", "Gatillo", "Umbral (pulsacion larga)",
-        "Confirmar salida", "Listo", "Idioma", "Tecla %d",
-        "Activado", "Desactivado", "Si", "No", "Ninguna",
-        "Mantener Home", "Home + Select", "Home + Start", "L1 + R1",
-        "Mantener Select", "Mantener Start", "Personalizado",
-        "Arriba/Abajo o < >: Elegir    A: Cambiar    B: Salir (guardado automatico)",
-        "LED", "Brillo LED", "Color LED", "Silenciar", "Encendido", "Apagado",
-        "Aprender", "Restablecer", "Acerca de",
-        "Pulsa los botones (B: listo)", "Material Icons (Apache 2.0)",
-        "A/B: volver",
-        "Actualizar", "Actualizador", "Versión instalada", "Última versión",
-        "Consultando GitHub...", "Estás al día", "Hay una versión nueva",
-        "No se pudo consultar", "A: Instalar   B: Cancelar", "Instalando...",
-        "Instalado. Reinicia la app", "B: Volver",
-        "WiFi", "Bluetooth", "^ v: Menu   < >: Elegir   A: Cambiar",
-        "Opciones", "Reinstalar versión actual", "SELECT: Opciones", "Volver",
-        "^ v / < >: Elegir   A: Cambiar   B: Volver",
-        "Misma versión: reinstalar disponible", "A: Reinstalar   B: Cancelar",
-        "TECLADO VIRTUAL",
-        "^ v / < >: Mover   A: Escribir   B: Volver   Y: Mayús   X: 123   START: Intro   SELECT: Borrar",
-        "Escribe aquí...", "Teclado del sistema no disponible",
-    },
-    { /* English */
-        "SETTINGS", "HOME / B: close",
-        "Volume", "Brightness", "Contrast", "Exposure", "Saturation", "Temperature",
-        "Continue", "Exit game", "Reboot", "Power off", "Keyboard",
-        "A: Accept", "unavailable",
-        "^ v: Select   < >: Adjust   B: Close",
-        "^ v / < >: Select   A: Accept   B: Close",
-        "^ v / < >: Select   A: Open keyboard   B: Close",
-        "Exit game?", "Restart the device?", "Power off the device?",
-        "A: Yes      B: No", "Exiting game...",
-        "Overlay settings", "Status", "Trigger", "Threshold (long press)",
-        "Confirm exit", "Done", "Language", "Key %d",
-        "Enabled", "Disabled", "Yes", "No", "None",
-        "Hold Home", "Home + Select", "Home + Start", "L1 + R1",
-        "Hold Select", "Hold Start", "Custom",
-        "Up/Down or < >: Select    A: Change    B: Exit (auto-saved)",
-        "LED", "LED brightness", "LED color", "Mute", "On", "Off",
-        "Learn", "Reset", "About",
-        "Press buttons (B: done)", "Material Icons (Apache 2.0)",
-        "A/B: back",
-        "Update", "Updater", "Installed version", "Latest version",
-        "Checking GitHub...", "You are up to date", "A new version is available",
-        "Could not check", "A: Install   B: Cancel", "Installing...",
-        "Installed. Restart the app", "B: Back",
-        "Wi-Fi", "Bluetooth", "^ v: Menu   < >: Select   A: Toggle",
-        "Options", "Reinstall current version", "SELECT: Options", "Back",
-        "^ v / < >: Select   A: Change   B: Back",
-        "Same version: reinstall available", "A: Reinstall   B: Cancel",
-        "VIRTUAL KEYBOARD",
-        "^ v / < >: Move   A: Type   B: Back   Y: Shift   X: 123   START: Enter   SELECT: Del",
-        "Type here...", "System keyboard unavailable",
-    },
-    { /* Portuguese */
-        "AJUSTES", "HOME / B: fechar",
-        "Volume", "Brilho", "Contraste", "Exposição", "Saturação", "Temperatura",
-        "Continuar", "Sair do jogo", "Reiniciar", "Desligar", "Teclado",
-        "A: Aceitar", "indisponível",
-        "^ v: Escolher   < >: Ajustar   B: Fechar",
-        "^ v / < >: Escolher   A: Aceitar   B: Fechar",
-        "^ v / < >: Escolher   A: Abrir teclado   B: Fechar",
-        "Sair do jogo?", "Reiniciar o dispositivo?", "Desligar o dispositivo?",
-        "A: Sim      B: Não", "Saindo do jogo...",
-        "Ajustes do overlay", "Estado", "Gatilho", "Limiar (pressão longa)",
-        "Confirmar saída", "Concluído", "Idioma", "Tecla %d",
-        "Ativado", "Desativado", "Sim", "Não", "Nenhuma",
-        "Manter Home", "Home + Select", "Home + Start", "L1 + R1",
-        "Manter Select", "Manter Start", "Personalizado",
-        "Cima/Baixo ou < >: Escolher    A: Alterar    B: Sair (salvamento automático)",
-        "LED", "LED brilho", "Cor do LED", "Silenciar", "Ligado", "Desligado",
-        "Aprender", "Redefinir", "Sobre",
-        "Pressione os botões (B: pronto)", "Material Icons (Apache 2.0)",
-        "A/B: voltar",
-        "Atualizar", "Atualizador", "Versão instalada", "Última versão",
-        "Consultando o GitHub...", "Você está em dia", "Há uma versão nova",
-        "Não foi possível verificar", "A: Instalar   B: Cancelar", "Instalando...",
-        "Instalado. Reinicie o app", "B: Voltar",
-        "Wi-Fi", "Bluetooth", "^ v: Menu   < >: Escolher   A: Alternar",
-        "Opções", "Reinstalar versão atual", "SELECT: Opções", "Voltar",
-        "^ v / < >: Escolher   A: Alterar   B: Voltar",
-        "Mesma versão: reinstalar disponível", "A: Reinstalar   B: Cancelar",
-        "TECLADO VIRTUAL",
-        "^ v / < >: Mover   A: Digitar   B: Voltar   Y: Maiús   X: 123   START: Enter   SELECT: Apagar",
-        "Digite aqui...", "Teclado do sistema indisponível",
-    },
+/* Translation values live in app/lang/<code>.json. This array holds the
+ * schema (the key names) and g_tr_values holds the loaded strings. */
+static const char *const g_tr_keys[S_COUNT] = {
+    "S_AJUSTES", "S_HINT_CLOSE", "S_VOL", "S_BRI",
+    "S_CON", "S_EXP", "S_SAT", "S_TMP",
+    "S_PLAY", "S_EXIT", "S_REBOOT", "S_POWER",
+    "S_KEYBOARD", "S_ACCEPT", "S_DISABLED_TXT", "S_HINT_SLIDER",
+    "S_HINT_ACTION", "S_HINT_KEYBOARD", "S_CONFIRM_EXIT", "S_CONFIRM_REBOOT",
+    "S_CONFIRM_POWER", "S_CONFIRM_KEYS", "S_BUSY", "S_CFG_SUBTITLE",
+    "S_CFG_ESTADO", "S_CFG_GATILLO", "S_CFG_UMBRAL", "S_CFG_CONFIRMAR",
+    "S_CFG_LISTO", "S_CFG_IDIOMA", "S_KEYFMT", "S_ENABLED",
+    "S_DISABLED_VAL", "S_SI", "S_NO", "S_NONE",
+    "S_PRESET_HOLD_HOME", "S_PRESET_HOME_SELECT", "S_PRESET_HOME_START", "S_PRESET_L1R1",
+    "S_PRESET_HOLD_SELECT", "S_PRESET_HOLD_START", "S_PRESET_CUSTOM", "S_CFG_FOOTER",
+    "S_LED", "S_LED_BRI", "S_LED_COLOR", "S_MUTE",
+    "S_ON", "S_OFF", "S_LEARN", "S_RESET",
+    "S_ABOUT", "S_LEARN_TITLE", "S_ABOUT_TEXT", "S_ABOUT_HINT",
+    "S_UPDATE", "S_UPDATE_TITLE", "S_UPDATE_LOCAL", "S_UPDATE_LATEST",
+    "S_UPDATE_CHECKING", "S_UPDATE_UPTODATE", "S_UPDATE_AVAILABLE", "S_UPDATE_ERROR",
+    "S_UPDATE_CONFIRM", "S_UPDATE_INSTALLING", "S_UPDATE_INSTALLED", "S_UPDATE_BACK",
+    "S_WIFI", "S_BT", "S_HINT_RADIO", "S_UPDATE_OPTIONS",
+    "S_UPDATE_REINSTALL", "S_UPDATE_HINT", "S_UPDATE_BACK_ROW", "S_UPDATE_OPTIONS_HINT",
+    "S_UPDATE_SAME_AVAIL", "S_UPDATE_SAME_CONFIRM", "S_KB_TITLE", "S_KB_HINT",
+    "S_KB_EMPTY", "S_KB_UNAVAILABLE", "S_CFG_SIGSTOP",
 };
+static char g_tr_values[S_COUNT][256];
 
-#define TR(id) (g_tr[g_lang][(id)])
+#define TR(id) (g_tr_values[(id)][0] ? g_tr_values[(id)] : g_tr_keys[(id)])
 #define LANG_NAME(l) (l == LANG_EN ? "English" : (l == LANG_PT ? "Português" : "Español"))
+
+static const char *const g_lang_codes[NLANG] = { "es", "en", "pt" };
+
+/* Load app/lang/<code>.json. Values missing from the file fall back to the
+ * key name so the UI never renders blank labels. OVERLAY_LANG_DIR can point
+ * to an alternative folder (useful for testing). */
+static void lang_load(int lang)
+{
+    int idx = lang;
+    if (idx < 0 || idx >= NLANG)
+        idx = 0;
+    const char *code = g_lang_codes[idx];
+    char path[512] = "";
+    const char *dir = getenv("OVERLAY_LANG_DIR");
+    if (dir && *dir) {
+        snprintf(path, sizeof path, "%s/%s.json", dir, code);
+    } else {
+        char exe[512];
+        ssize_t n = readlink("/proc/self/exe", exe, sizeof exe - 1);
+        if (n > 0) {
+            exe[n] = '\0';
+            char *slash = strrchr(exe, '/');
+            if (slash) {
+                *slash = '\0';
+                snprintf(path, sizeof path, "%s/../lang/%s.json", exe, code);
+            }
+        }
+        if (!path[0] || access(path, R_OK) != 0)
+            snprintf(path, sizeof path, "%s/lang/%s.json", APP_DIR, code);
+    }
+
+    memset(g_tr_values, 0, sizeof g_tr_values);
+    int loaded = json_load_strings(path, g_tr_keys, g_tr_values, S_COUNT);
+    if (loaded < 0) {
+        logm("language file %s unavailable", path);
+        loaded = 0;
+    }
+    for (int i = 0; i < S_COUNT; i++)
+        if (!g_tr_values[i][0])
+            snprintf(g_tr_values[i], sizeof g_tr_values[i], "%s", g_tr_keys[i]);
+    logm("language %s: %d/%d strings from %s", code, loaded, S_COUNT, path);
+}
 
 static void items_set_language(void)
 {
@@ -1768,6 +1739,7 @@ static void config_load(void)
 {
     g_cfg_enabled = (access(DISABLE_FLAG, F_OK) != 0);
     g_cfg_confirm = g_cfg.confirm_exit;
+    g_cfg_sigstop = g_cfg.no_sigstop;
     g_cfg_preset = 0;
     int found = 0;
     for (int p = 0; p < NPRESETS; p++) {
@@ -1844,6 +1816,7 @@ static void config_save(void)
         fprintf(f, "dim=%d\n", g_cfg.dim);
         fprintf(f, "step=%d\n", g_cfg.step);
         fprintf(f, "confirm_exit=%d\n", g_cfg_confirm ? 1 : 0);
+        fprintf(f, "no_sigstop=%d\n", g_cfg_sigstop ? 1 : 0);
         fprintf(f, "lang=%s\n", g_lang == LANG_EN ? "en" : (g_lang == LANG_PT ? "pt" : "es"));
         fprintf(f, "upd_reinstall=%d\n", g_cfg.upd_reinstall ? 1 : 0);
         if (g_cfg.led_color_set)
@@ -1904,7 +1877,12 @@ static void config_activate(void)
     }
     case CFG_UMBRAL:    g_cfg_hold = (g_cfg_hold + 1) % NHOLDS; break;
     case CFG_CONFIRMAR: g_cfg_confirm = !g_cfg_confirm; break;
-    case CFG_IDIOMA:    g_lang = (g_lang + 1) % NLANG; break;
+    case CFG_IDIOMA:
+        g_lang = (g_lang + 1) % NLANG;
+        lang_load(g_lang);
+        items_set_language();
+        break;
+    case CFG_SIGSTOP:   g_cfg_sigstop = !g_cfg_sigstop; break;
     case CFG_LEARN:
         g_learning = 1;
         g_learn_mask = 0;
@@ -1917,6 +1895,7 @@ static void config_activate(void)
         custom_from_codes(g_presets[0].codes, g_presets[0].count);
         g_cfg_confirm = 1;
         g_cfg_enabled = 1;
+        g_cfg_sigstop = g_cfg.no_sigstop; /* default = layer, no SIGSTOP */
         g_dim = g_cfg.dim;
         cfg_update_led_color(&g_cfg, 0xFFFFFF, 0);
         led_color_apply(0xFFFFFF);
@@ -1982,6 +1961,7 @@ static void config_compose(void)
     snprintf(labels[CFG_UMBRAL], sizeof labels[0], "%s", TR(S_CFG_UMBRAL));
     snprintf(labels[CFG_CONFIRMAR], sizeof labels[0], "%s", TR(S_CFG_CONFIRMAR));
     snprintf(labels[CFG_IDIOMA], sizeof labels[0], "%s", TR(S_CFG_IDIOMA));
+    snprintf(labels[CFG_SIGSTOP], sizeof labels[0], "%s", TR(S_CFG_SIGSTOP));
     snprintf(labels[CFG_LEARN], sizeof labels[0], "%s", TR(S_LEARN));
     snprintf(labels[CFG_RESET], sizeof labels[0], "%s", TR(S_RESET));
     snprintf(labels[CFG_ABOUT], sizeof labels[0], "%s", TR(S_ABOUT));
@@ -1996,23 +1976,27 @@ static void config_compose(void)
     snprintf(values[CFG_UMBRAL], sizeof values[0], "%d ms", g_holds[g_cfg_hold]);
     snprintf(values[CFG_CONFIRMAR], sizeof values[0], "%s", g_cfg_confirm ? TR(S_SI) : TR(S_NO));
     snprintf(values[CFG_IDIOMA], sizeof values[0], "%s", LANG_NAME(g_lang));
+    snprintf(values[CFG_SIGSTOP], sizeof values[0], "%s",
+             g_cfg_sigstop ? TR(S_SI) : TR(S_NO));
     values[CFG_LEARN][0] = '\0';
     values[CFG_RESET][0] = '\0';
     values[CFG_ABOUT][0] = '\0';
     snprintf(values[CFG_UPDATE], sizeof values[0], "v%s", g_manifest.version);
     values[CFG_LISTO][0] = '\0';
 
-    int y0 = 150, row = 0;
+    /* One more row than before: tighten the spacing so the last row still
+     * clears the footer at y=684. */
+    int y0 = 148, row = 0;
     for (int i = 0; i < NCFG; i++) {
         if (!cfg_visible(i))
             continue;
-        int y = y0 + row * 40;
+        int y = y0 + row * 36;
         row++;
         int focused = (i == g_cfg_sel);
-        fill_round_a(220, y, SCR_W - 440, 36, 10,
+        fill_round_a(220, y, SCR_W - 440, 32, 10,
                      focused ? 0xE62037 : 0x1A1B22, focused ? 255 : 235);
-        draw_text(labels[i], 260, y + 4, g_f_mid, focused ? 0xFFFFFF : 0xBCBEC8, 0);
-        draw_text(values[i], SCR_W - 260, y + 4, g_f_mid, focused ? 0xFFFFFF : 0xF0F2F8, 2);
+        draw_text(labels[i], 260, y + 2, g_f_mid, focused ? 0xFFFFFF : 0xBCBEC8, 0);
+        draw_text(values[i], SCR_W - 260, y + 2, g_f_mid, focused ? 0xFFFFFF : 0xF0F2F8, 2);
     }
 
     draw_text(TR(S_CFG_FOOTER), SCR_W / 2, 684, g_f_small, 0x9698A2, 1);
@@ -2554,6 +2538,7 @@ int main(int argc, char **argv)
     cfg_load(&g_cfg);
     g_dim = g_cfg.dim;
     g_lang = clampi(g_cfg.lang, 0, NLANG - 1);
+    lang_load(g_lang);
     items_set_language();
     if (g_mode_cfg)
         config_load();

@@ -20,14 +20,15 @@ for f in "$SRC/dist/bin/overlayd" "$SRC/dist/bin/overlay_ui" \
          "$SRC/app/config.json" "$SRC/app/manifest.json" "$SRC/app/icon.png" "$SRC/app/launch.sh" \
          "$SRC/app/overlayctl" "$SRC/app/overLyder.start" "$SRC/app/updater.sh" \
          "$SRC/app/resources/MaterialIcons-Regular.ttf" \
-         "$SRC/app/resources/LICENSE-MaterialIcons.txt"; do
+         "$SRC/app/resources/LICENSE-MaterialIcons.txt" \
+         "$SRC/app/lang/es.json" "$SRC/app/lang/en.json" "$SRC/app/lang/pt.json"; do
     if [ ! -f "$f" ]; then
         echo "Missing file: $f"
         exit 1
     fi
 done
 
-mkdir -p "$APP/bin" "$APP/defaults" "$APP/resources" "$ETC" "$STARTS"
+mkdir -p "$APP/bin" "$APP/defaults" "$APP/resources" "$APP/lang" "$ETC" "$STARTS"
 
 echo "Backing up existing configuration..."
 for f in "$CFG" "$DISABLE" "$HOOK"; do
@@ -50,6 +51,7 @@ cp -f "$SRC/dist/bin/overlayd" "$APP/bin/overlayd"
 cp -f "$SRC/dist/bin/overlay_ui" "$APP/bin/overlay_ui"
 cp -f "$SRC/app/resources/MaterialIcons-Regular.ttf" "$APP/resources/"
 cp -f "$SRC/app/resources/LICENSE-MaterialIcons.txt" "$APP/resources/"
+cp -f "$SRC/app/lang/"*.json "$APP/lang/"
 chmod 755 "$APP/launch.sh" "$APP/overlayctl" "$APP/updater.sh" "$APP/bin/overlayd" "$APP/bin/overlay_ui"
 
 if [ ! -f "$CFG" ]; then

@@ -102,6 +102,10 @@ int write_str_file(const char *path, const char *s);
 int run_cmd(const char *fmt, ...);
 int read_cmd(char *out, size_t outsz, const char *fmt, ...);
 
+/* Flat JSON string-object loader (used by the language files). */
+int json_load_strings(const char *path, const char *const *keys,
+                      char (*out)[256], int n);
+
 int keycode_from_name(const char *name);
 
 #endif

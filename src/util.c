@@ -129,27 +129,57 @@ int keycode_from_name(const char *name)
     return -1;
 }
 
-/* Minimal JSON string reader: the manifest is a tiny flat object, so pulling
- * quoted values out with strstr is enough and avoids a JSON dependency. */
-static void json_string(const char *json, const char *key, char *out, size_t n)
+/* Minimal JSON string reader: our JSON files are flat objects of string
+ * values, so pulling them out with strstr is enough and avoids a dependency.
+ * Returns 1 when the key was found. */
+static int json_string(const char *json, const char *key, char *out, size_t n)
 {
-    char needle[64];
+    char needle[96];
     snprintf(needle, sizeof needle, "\"%s\"", key);
     const char *p = strstr(json, needle);
     if (!p)
-        return;
+        return 0;
     p = strchr(p, ':');
     if (!p)
-        return;
+        return 0;
     p++;
     while (*p && isspace((unsigned char)*p))
         p++;
     if (*p++ != '"')
-        return;
+        return 0;
     size_t i = 0;
-    while (*p && *p != '"' && i + 1 < n)
-        out[i++] = *p++;
+    while (*p && *p != '"' && i + 1 < n) {
+        if (*p == '\\' && p[1]) {
+            p++;
+            out[i++] = (*p == 'n') ? '\n' : *p;
+            p++;
+        } else {
+            out[i++] = *p++;
+        }
+    }
     out[i] = '\0';
+    return 1;
+}
+
+/* Load a flat JSON object of string values into a table indexed by `keys`.
+ * Missing keys are left empty. Returns the number of values loaded. */
+int json_load_strings(const char *path, const char *const *keys,
+                      char (*out)[256], int n)
+{
+    FILE *f = fopen(path, "r");
+    if (!f)
+        return -1;
+    char buf[32768];
+    size_t len = fread(buf, 1, sizeof buf - 1, f);
+    buf[len] = '\0';
+    fclose(f);
+    int loaded = 0;
+    for (int i = 0; i < n; i++) {
+        out[i][0] = '\0';
+        if (json_string(buf, keys[i], out[i], 256))
+            loaded++;
+    }
+    return loaded;
 }
 
 void manifest_load(app_manifest *m)

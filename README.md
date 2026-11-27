@@ -25,7 +25,7 @@ Hold the Home button (or a combo you choose) and a Switch-style overlay slides o
 - Mute, quit the game, reboot and shut down
 - Virtual keyboard: opens from the overlay, sends real key presses to the app underneath and returns to the panel with B/Home
 - No patches or setup inside the game
-- Trigger, hold time and language (Spanish, English, Portuguese) set from the app
+- Trigger, hold time, language (Spanish, English, Portuguese, from JSON files) and the SIGSTOP/layer mode set from the app
 - Built-in updater in the app: shows the installed version and checks GitHub releases for a newer one
 
 ## Install
@@ -65,7 +65,9 @@ old freeze-the-game behaviour. The last typed text is also saved to
 
 ### SIGSTOP or no SIGSTOP
 
-Both modes ship in the same binaries. Set `no_sigstop` in
+Both modes ship in the same binaries. You can switch with the new **Capa sin
+SIGSTOP** / **Layer, no SIGSTOP** row in the app's settings screen (values
+Sí/No), or by editing `no_sigstop` in
 `/mnt/SDCARD/System/etc/overlay.cfg`:
 
 - `no_sigstop=1` (default) — draw on a hardware display layer; the game is
@@ -80,6 +82,13 @@ The reverse-engineering, device measurements and pitfalls behind the layer
 approach are documented in [docs/NO_SIGSTOP_OVERLAY.md](docs/NO_SIGSTOP_OVERLAY.md).
 
 You can tweak the trigger and timing from the app.
+
+## Languages
+
+All UI strings are flat JSON files in `app/lang/` (`es.json`, `en.json`,
+`pt.json`), installed to `Apps/OverLyder/lang/`. See
+[docs/LANGUAGES.md](docs/LANGUAGES.md) for the format, loading order, fallback
+and how to add a language.
 
 ## Build from source (Windows host)
 

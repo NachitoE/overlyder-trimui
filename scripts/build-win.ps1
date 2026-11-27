@@ -56,12 +56,13 @@ if ($LASTEXITCODE -ne 0) { throw "vpad build failed" }
 
 Write-Host "=== release package"
 $pkg = "$Out\OverLyder"
-New-Item -ItemType Directory -Force -Path "$pkg\bin", "$pkg\resources", "$pkg\defaults" | Out-Null
+New-Item -ItemType Directory -Force -Path "$pkg\bin", "$pkg\resources", "$pkg\defaults", "$pkg\lang" | Out-Null
 Copy-Item "app\config.json", "app\manifest.json", "app\icon.png", "app\launch.sh", "app\overlayctl", `
           "app\overLyder.start", "app\updater.sh" -Destination $pkg -Force
 Copy-Item "app\defaults\overlay.cfg" -Destination "$pkg\defaults" -Force
 Copy-Item "app\resources\*" -Destination "$pkg\resources" -Force
 Copy-Item "$Out\bin\overlayd", "$Out\bin\overlay_ui" -Destination "$pkg\bin" -Force
+Copy-Item "app\lang\*.json" -Destination "$pkg\lang" -Force
 
 Write-Host "=== done"
 Get-ChildItem "$Out\bin" | Select-Object Name, Length

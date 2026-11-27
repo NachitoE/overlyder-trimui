@@ -11,6 +11,28 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 Set-Location $root
 
+# The include folders are extracted from the SDL zip releases. Their exact
+# name changes with the version (SDL2-2.30.0, SDL2_ttf-2.22.0, ...), so accept
+# the historical names and fall back to whatever is under %TEMP%\sdl.
+function Resolve-Include([string]$hint, [string]$pattern) {
+    if (Test-Path $hint) { return $hint }
+    $dir = Get-ChildItem -Path (Join-Path $env:TEMP "sdl") -Directory -Filter $pattern -ErrorAction SilentlyContinue |
+           Select-Object -First 1
+    if ($dir) { return (Join-Path $dir.FullName "include") }
+    return $hint
+}
+$SdlInc = Resolve-Include $SdlInc "SDL2-*"
+$TtfInc = Resolve-Include $TtfInc "SDL2_ttf-*"
+if (-not (Test-Path (Join-Path $SdlInc "SDL.h"))) {
+    throw "SDL2 headers not found at '$SdlInc'. Unzip SDL2 into %TEMP%\\sdl or pass -SdlInc <path>."
+}
+if (-not (Test-Path (Join-Path $TtfInc "SDL_ttf.h"))) {
+    throw "SDL_ttf headers not found at '$TtfInc'. Unzip SDL_ttf into %TEMP%\\sdl or pass -TtfInc <path>."
+}
+if (-not (Test-Path $SdlLib)) {
+    throw "SDL2 aarch64 libraries not found at '$SdlLib'. Copy libSDL2-2.0.so.0 and libSDL2_ttf-2.0.so.0 from the device's /usr/trimui/lib/ into a folder, name them libSDL2.so / libSDL2_ttf.so, and pass -SdlLib <folder>."
+}
+
 New-Item -ItemType Directory -Force -Path "$Out\bin" | Out-Null
 
 $common = @(
@@ -20,11 +42,11 @@ $common = @(
 )
 
 Write-Host "=== overlayd"
-& $Zig @common src/util.c src/overlayd.c -o "$Out/bin/overlayd"
+& $Zig @common src/util.c src/overlay_layer.c src/textinject.c src/overlayd.c -o "$Out/bin/overlayd"
 if ($LASTEXITCODE -ne 0) { throw "overlayd build failed" }
 
 Write-Host "=== overlay_ui"
-& $Zig @common src/util.c src/overlay_ui.c `
+& $Zig @common src/util.c src/overlay_layer.c src/textinject.c src/overlay_ui.c `
     -L $SdlLib -lSDL2 -lSDL2_ttf -lm -o "$Out/bin/overlay_ui"
 if ($LASTEXITCODE -ne 0) { throw "overlay_ui build failed" }
 

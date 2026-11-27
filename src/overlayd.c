@@ -1,4 +1,6 @@
 #include "common.h"
+#include "overlay_layer.h"
+#include "textinject.h"
 
 #include <ctype.h>
 #include <dirent.h>
@@ -231,17 +233,17 @@ static int is_system_daemon(pid_t pid)
     return 0;
 }
 
-static void stop_targets(void)
+/* Collect the game tree and MainUI without signalling anybody. Used both by
+ * the classic SIGSTOP backend and by kill_game() in no-SIGSTOP mode. */
+static void collect_targets(pid_t *pids, int *out_n, int *has_game)
 {
-    pid_t pids[MAX_STOP];
     int n = 0;
-    g_nstopped = 0;
-    g_has_game = 0;
+    *has_game = 0;
 
     pid_t anchor = find_pid_cmdline("cmd_to_run.sh");
     if (anchor > 0) {
         n = collect_tree(anchor, pids, MAX_STOP);
-        g_has_game = 1;
+        *has_game = 1;
     }
     if (n == 0) {
         /* fallback: children of runtrimui.sh (when the launcher script exec'd) */
@@ -256,10 +258,11 @@ static void stop_targets(void)
             if (tmp[i] == rt)
                 continue;
             pids[n++] = tmp[i];
-            g_has_game = 1;
+            *has_game = 1;
         }
     }
-    /* always pause MainUI too (prevents repaint while overlay is up) */
+    /* Always include MainUI: in the classic backend it would repaint over us.
+     * In no-SIGSTOP mode we only use this list for exiting the game. */
     pid_t mainui = read_comm_pid("MainUI");
     if (mainui > 0) {
         int dup = 0;
@@ -269,7 +272,26 @@ static void stop_targets(void)
         if (!dup && n < MAX_STOP)
             pids[n++] = mainui;
     }
+    *out_n = n;
 
+    /* Also publish the target list without stopping anything: the UI needs it
+     * to exit the game in no-SIGSTOP mode. */
+    FILE *f = fopen(TARGETS_FILE, "w");
+    if (f) {
+        for (int i = 0; i < n; i++)
+            fprintf(f, "%d\n", (int)pids[i]);
+        fclose(f);
+    }
+}
+
+static void stop_targets(void)
+{
+    pid_t pids[MAX_STOP];
+    int n = 0;
+    g_nstopped = 0;
+    g_has_game = 0;
+
+    collect_targets(pids, &n, &g_has_game);
     for (int i = 0; i < n; i++) {
         if (pids[i] == getpid())
             continue;
@@ -293,6 +315,17 @@ static void resume_targets(void)
 
 static void kill_game(void)
 {
+    pid_t pids[MAX_STOP];
+    int n = g_nstopped;
+    int has_game = 0;
+
+    if (n == 0) {
+        /* no-SIGSTOP mode: nothing is frozen, so collect targets now */
+        collect_targets(pids, &n, &has_game);
+        for (int i = 0; i < n; i++)
+            g_stopped[i] = pids[i];
+        g_nstopped = n;
+    }
     logm("exit game requested: %d process(es)", g_nstopped);
     for (int i = 0; i < g_nstopped; i++)
         kill(g_stopped[i], SIGCONT);
@@ -343,11 +376,30 @@ static void ui_path(char *out, size_t outsz)
 
 static void run_overlay(int fd)
 {
-    stop_targets();
+    int use_layer = g_cfg.no_sigstop && getenv("OVERLAY_NO_LAYER") == NULL;
+
+    /* If we cannot claim a hardware layer, fall back to freezing the game:
+     * two processes panning /dev/fb0 is exactly what causes the flicker. */
+    if (use_layer && overlay_layer_probe() != 0) {
+        logm("hardware layer unavailable, falling back to SIGSTOP");
+        use_layer = 0;
+    }
+
+    if (use_layer) {
+        pid_t pids[MAX_STOP];
+        int n = 0;
+        g_nstopped = 0;
+        g_has_game = 0;
+        collect_targets(pids, &n, &g_has_game);
+        unlink(STOPPED_FILE);
+        logm("using hardware layer, game keeps running (has_game=%d)", g_has_game);
+    } else {
+        stop_targets();
+    }
 
     char ui[512];
     ui_path(ui, sizeof ui);
-    logm("opening overlay (%s), has_game=%d", ui, g_has_game);
+    logm("opening overlay (%s), has_game=%d, layer=%d", ui, g_has_game, use_layer);
 
     pid_t pid = fork();
     if (pid == 0) {
@@ -356,6 +408,7 @@ static void run_overlay(int fd)
         prctl(PR_SET_PDEATHSIG, SIGTERM);
         setenv("OVERLAY_HAS_GAME", g_has_game ? "1" : "0", 1);
         setenv("OVERLAY_CFG", CFG_PATH, 1);
+        setenv("OVERLAY_NO_SIGSTOP", use_layer ? "1" : "0", 1);
         execl(ui, "overlay_ui", (char *)NULL);
         logm("exec failed: %s", strerror(errno));
         _exit(EXIT_FAILED);
@@ -443,6 +496,16 @@ int main(int argc, char **argv)
     sigaction(SIGTERM, &sa, NULL);
     sigaction(SIGINT, &sa, NULL);
     sigaction(SIGHUP, &sa, NULL);
+
+    /* Create the virtual keyboard once, at daemon startup, so any game
+     * launched afterwards sees it when it enumerates input devices. The fd is
+     * inherited by overlay_ui via OVERLAY_KBD_FD. */
+    int kbd_fd = keyboard_device_open();
+    if (kbd_fd >= 0) {
+        char b[32];
+        snprintf(b, sizeof b, "%d", kbd_fd);
+        setenv("OVERLAY_KBD_FD", b, 1);
+    }
 
     char dev[64];
     int waited = 0;

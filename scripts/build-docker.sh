@@ -24,9 +24,9 @@ run() {
 }
 
 echo "==> overlayd"
-run src/util.c src/overlayd.c -o dist/bin/overlayd
+run src/util.c src/overlay_layer.c src/textinject.c src/overlayd.c -o dist/bin/overlayd
 echo "==> overlay_ui"
-run src/util.c src/overlay_ui.c -L "$LIBS" -lSDL2 -lSDL2_ttf -lm -o dist/bin/overlay_ui
+run src/util.c src/overlay_layer.c src/textinject.c src/overlay_ui.c -L "$LIBS" -lSDL2 -lSDL2_ttf -lm -o dist/bin/overlay_ui
 echo "==> vpad (test tool)"
 run tools/vpad.c -o dist/bin/vpad
 echo "done: dist/bin"

@@ -191,6 +191,7 @@ void cfg_defaults(overlay_cfg *c)
     c->led_color = 0xFFFFFF;
     c->led_color_set = 0; /* do not override CrossMix LED presets by default */
     c->upd_reinstall = 0; /* never reinstall the same version unless asked */
+    c->no_sigstop = 1;    /* draw on a hardware layer, leave the game running */
 }
 
 static void trim(char *s)
@@ -262,6 +263,8 @@ int cfg_load(overlay_cfg *c)
                 c->lang = 0;
         } else if (!strcasecmp(k, "upd_reinstall")) {
             c->upd_reinstall = atoi(v) ? 1 : 0;
+        } else if (!strcasecmp(k, "no_sigstop")) {
+            c->no_sigstop = atoi(v) ? 1 : 0;
         } else if (!strcasecmp(k, "ledcolor")) {
             const char *hex = v;
             if (*hex == '#')

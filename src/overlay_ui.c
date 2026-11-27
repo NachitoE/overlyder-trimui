@@ -1,9 +1,12 @@
 #include "common.h"
+#include "overlay_layer.h"
+#include "textinject.h"
 
 #include <math.h>
 #include <SDL.h>
 #include <SDL_ttf.h>
 #include <linux/fb.h>
+#include <linux/uinput.h>
 #include <sys/mman.h>
 #include <sys/mount.h>
 #include <dirent.h>
@@ -19,10 +22,14 @@
 /* ------------------------------------------------------------------ */
 
 enum { IT_SLIDER = 0, IT_ACTION = 1, IT_TOGGLE = 2 };
-enum { ACT_NONE = 0, ACT_CLOSE, ACT_EXIT_GAME, ACT_REBOOT, ACT_POWEROFF };
+enum {
+    ACT_NONE = 0, ACT_CLOSE, ACT_EXIT_GAME, ACT_REBOOT, ACT_POWEROFF,
+    ACT_KEYBOARD
+};
 enum {
     I_VOL = 0, I_BRI, I_CON, I_EXP, I_SAT, I_TMP,
-    I_LEDBRI, I_LEDCOLOR, I_MUTE, I_PLAY, I_EXIT, I_REBOOT, I_POWER
+    I_LEDBRI, I_LEDCOLOR, I_MUTE, I_KEYBOARD,
+    I_PLAY, I_EXIT, I_REBOOT, I_POWER
 };
 
 /* Glyphs from the bundled Material Icons pack (Apache-2.0), by code point:
@@ -41,6 +48,7 @@ enum {
 #define GL_LED     0xEA24u  /* emoji_objects (lightbulb) */
 #define GL_COLOR   0xE0C3u  /* invert_colors */
 #define GL_MUTE    0xE04Fu  /* volume_off */
+#define GL_KEYBOARD 0xE5DAu /* keyboard */
 #define GL_BATTERY 0xE1A4u  /* battery_full */
 #define GL_WIFI    0xE63Eu  /* wifi (Material Icons v1.017 codepoint) */
 #define GL_BT      0xE1A7u  /* bluetooth */
@@ -64,6 +72,7 @@ static item_t items[] = {
     { "LED brillo",  IT_SLIDER, ACT_NONE,     10, 40, GL_LED },
     { "LED color",   IT_SLIDER, ACT_NONE,      5,  0, GL_COLOR },
     { "Silenciar",   IT_TOGGLE, ACT_NONE,      0,  0, GL_MUTE },
+    { "Teclado",     IT_ACTION, ACT_KEYBOARD,  0,  0, GL_KEYBOARD },
     { "Continuar",   IT_ACTION, ACT_CLOSE,     0,  0, GL_PLAY },
     { "Salir juego", IT_ACTION, ACT_EXIT_GAME, 0,  0, GL_EXIT },
     { "Reiniciar",   IT_ACTION, ACT_REBOOT,    0,  0, GL_REBOOT },
@@ -109,6 +118,20 @@ static int g_saved_vol = 50; /* volume restored when unmuting */
 static int g_ax = 0, g_ay = 0;         /* analog stick axes */
 static int g_stick_max = 0;            /* axis range from the driver */
 static int g_stick_dir = 0;            /* last applied stick direction */
+
+/* Virtual keyboard state. The overlay panel stays behind it but is not drawn
+ * while g_kb_open, so the keyboard behaves like a separate full-screen mode. */
+static int g_kb_open = 0;
+static long g_kb_open_at = 0;
+static long g_kb_closed_at = 0;
+static char g_kb_text[128];
+static int g_kb_shift = 0;
+static int g_kb_symbols = 0;
+static int g_kb_row = 0, g_kb_col = 0;
+static int g_kbd_fd = -1;               /* uinput virtual keyboard */
+static int g_kbd_inherited = 0;        /* owned by overlayd, do not close */
+static int g_gamepad_fd = -1;           /* the device the game actually reads */
+static int g_text_to_gamepad = 0;       /* OVERLAY_TEXT_TO_GAMEPAD=1 */
 
 /* ------------------------------------------------------------------ */
 /* configuration screen (CrossMix app)                                */
@@ -208,8 +231,8 @@ static int g_lang = LANG_ES;
 enum {
     S_AJUSTES, S_HINT_CLOSE,
     S_VOL, S_BRI, S_CON, S_EXP, S_SAT, S_TMP,
-    S_PLAY, S_EXIT, S_REBOOT, S_POWER,
-    S_ACCEPT, S_DISABLED_TXT, S_HINT_SLIDER, S_HINT_ACTION,
+    S_PLAY, S_EXIT, S_REBOOT, S_POWER, S_KEYBOARD,
+    S_ACCEPT, S_DISABLED_TXT, S_HINT_SLIDER, S_HINT_ACTION, S_HINT_KEYBOARD,
     S_CONFIRM_EXIT, S_CONFIRM_REBOOT, S_CONFIRM_POWER, S_CONFIRM_KEYS, S_BUSY,
     S_CFG_SUBTITLE, S_CFG_ESTADO, S_CFG_GATILLO, S_CFG_UMBRAL,
     S_CFG_CONFIRMAR, S_CFG_LISTO, S_CFG_IDIOMA, S_KEYFMT,
@@ -224,17 +247,19 @@ enum {
     S_UPDATE_CONFIRM, S_UPDATE_INSTALLING, S_UPDATE_INSTALLED, S_UPDATE_BACK,
     S_WIFI, S_BT, S_HINT_RADIO,
     S_UPDATE_OPTIONS, S_UPDATE_REINSTALL, S_UPDATE_HINT, S_UPDATE_BACK_ROW,
-    S_UPDATE_OPTIONS_HINT, S_UPDATE_SAME_AVAIL, S_UPDATE_SAME_CONFIRM, S_COUNT
+    S_UPDATE_OPTIONS_HINT, S_UPDATE_SAME_AVAIL, S_UPDATE_SAME_CONFIRM,
+    S_KB_TITLE, S_KB_HINT, S_KB_EMPTY, S_KB_UNAVAILABLE, S_COUNT
 };
 
 static const char *const g_tr[NLANG][S_COUNT] = {
     { /* Spanish */
         "AJUSTES", "HOME / B: cerrar",
         "Volumen", "Brillo", "Contraste", "Exposición", "Saturación", "Temperatura",
-        "Continuar", "Salir juego", "Reiniciar", "Apagar",
+        "Continuar", "Salir juego", "Reiniciar", "Apagar", "Teclado",
         "A: Aceptar", "no disponible",
         "^ v: Elegir   < >: Ajustar   B: Cerrar",
         "^ v / < >: Elegir   A: Aceptar   B: Cerrar",
+        "^ v / < >: Elegir   A: Abrir teclado   B: Cerrar",
         "Salir del juego?", "Reiniciar el dispositivo?", "Apagar el dispositivo?",
         "A: Si      B: No", "Saliendo del juego...",
         "Ajustes del overlay", "Estado", "Gatillo", "Umbral (pulsacion larga)",
@@ -255,14 +280,18 @@ static const char *const g_tr[NLANG][S_COUNT] = {
         "Opciones", "Reinstalar versión actual", "SELECT: Opciones", "Volver",
         "^ v / < >: Elegir   A: Cambiar   B: Volver",
         "Misma versión: reinstalar disponible", "A: Reinstalar   B: Cancelar",
+        "TECLADO VIRTUAL",
+        "^ v / < >: Mover   A: Escribir   B: Volver   Y: Mayús   X: 123   START: Intro   SELECT: Borrar",
+        "Escribe aquí...", "Teclado del sistema no disponible",
     },
     { /* English */
         "SETTINGS", "HOME / B: close",
         "Volume", "Brightness", "Contrast", "Exposure", "Saturation", "Temperature",
-        "Continue", "Exit game", "Reboot", "Power off",
+        "Continue", "Exit game", "Reboot", "Power off", "Keyboard",
         "A: Accept", "unavailable",
         "^ v: Select   < >: Adjust   B: Close",
         "^ v / < >: Select   A: Accept   B: Close",
+        "^ v / < >: Select   A: Open keyboard   B: Close",
         "Exit game?", "Restart the device?", "Power off the device?",
         "A: Yes      B: No", "Exiting game...",
         "Overlay settings", "Status", "Trigger", "Threshold (long press)",
@@ -283,14 +312,18 @@ static const char *const g_tr[NLANG][S_COUNT] = {
         "Options", "Reinstall current version", "SELECT: Options", "Back",
         "^ v / < >: Select   A: Change   B: Back",
         "Same version: reinstall available", "A: Reinstall   B: Cancel",
+        "VIRTUAL KEYBOARD",
+        "^ v / < >: Move   A: Type   B: Back   Y: Shift   X: 123   START: Enter   SELECT: Del",
+        "Type here...", "System keyboard unavailable",
     },
     { /* Portuguese */
         "AJUSTES", "HOME / B: fechar",
         "Volume", "Brilho", "Contraste", "Exposição", "Saturação", "Temperatura",
-        "Continuar", "Sair do jogo", "Reiniciar", "Desligar",
+        "Continuar", "Sair do jogo", "Reiniciar", "Desligar", "Teclado",
         "A: Aceitar", "indisponível",
         "^ v: Escolher   < >: Ajustar   B: Fechar",
         "^ v / < >: Escolher   A: Aceitar   B: Fechar",
+        "^ v / < >: Escolher   A: Abrir teclado   B: Fechar",
         "Sair do jogo?", "Reiniciar o dispositivo?", "Desligar o dispositivo?",
         "A: Sim      B: Não", "Saindo do jogo...",
         "Ajustes do overlay", "Estado", "Gatilho", "Limiar (pressão longa)",
@@ -311,6 +344,9 @@ static const char *const g_tr[NLANG][S_COUNT] = {
         "Opções", "Reinstalar versão atual", "SELECT: Opções", "Voltar",
         "^ v / < >: Escolher   A: Alterar   B: Voltar",
         "Mesma versão: reinstalar disponível", "A: Reinstalar   B: Cancelar",
+        "TECLADO VIRTUAL",
+        "^ v / < >: Mover   A: Digitar   B: Voltar   Y: Maiús   X: 123   START: Enter   SELECT: Apagar",
+        "Digite aqui...", "Teclado do sistema indisponível",
     },
 };
 
@@ -321,7 +357,7 @@ static void items_set_language(void)
 {
     static const int ids[NITEMS] = {
         S_VOL, S_BRI, S_CON, S_EXP, S_SAT, S_TMP,
-        S_LED_BRI, S_LED_COLOR, S_MUTE,
+        S_LED_BRI, S_LED_COLOR, S_MUTE, S_KEYBOARD,
         S_PLAY, S_EXIT, S_REBOOT, S_POWER
     };
     for (int i = 0; i < NITEMS; i++)
@@ -357,6 +393,11 @@ static uint32_t g_cv[CANVAS_PX];      /* our canvas          */
 static uint32_t g_bg[CANVAS_PX];      /* captured background */
 static uint32_t g_bg_dim[CANVAS_PX];  /* pre-dimmed background */
 static int g_bg_ok = 0;
+
+/* Optional hardware-layer backend: the game keeps running and we composite
+ * our canvas on a separate display layer instead of fighting for /dev/fb0. */
+static overlay_layer g_layer;
+static int g_use_layer = 0;
 
 static int g_fb_fd = -1;
 static unsigned char *g_fb_mem = NULL;
@@ -424,6 +465,40 @@ static void fb_flip(void)
         ioctl(g_fb_fd, FBIOPUT_VSCREENINFO, &v);
 }
 
+/* Write the canvas into our hardware-layer page. The display engine expects
+ * the UI layer geometry (720x1280 portrait, rotated to the panel), so rotate
+ * our 1280x720 canvas into that buffer. */
+static void layer_flip(void)
+{
+    uint32_t *dst = g_layer.pixels;
+    if (!dst)
+        return;
+    if (g_layer.width == SCR_W && g_layer.height == SCR_H) {
+        memcpy(dst, g_cv, sizeof g_cv);
+        return;
+    }
+    if (g_layer.width != SCR_H || g_layer.height != SCR_W) {
+        logm("unexpected layer geometry %dx%d", g_layer.width, g_layer.height);
+        return;
+    }
+    for (int y = 0; y < SCR_H; y++) {
+        for (int x = 0; x < SCR_W; x++) {
+            int dx = y;
+            int dy = SCR_W - 1 - x;
+            dst[(size_t)dy * (size_t)g_layer.width + (size_t)dx] =
+                g_cv[(size_t)y * SCR_W + (size_t)x];
+        }
+    }
+}
+
+static void display_flip(void)
+{
+    if (g_use_layer)
+        layer_flip();
+    else
+        fb_flip();
+}
+
 static void fb_restore(void)
 {
     if (!g_fb_mem || !g_bg_ok)
@@ -447,6 +522,23 @@ static inline void px_blend(int x, int y, uint32_t rgb, int a)
     if ((unsigned)x >= SCR_W || (unsigned)y >= SCR_H || a <= 0)
         return;
     uint32_t *d = &g_cv[y * SCR_W + x];
+    if (g_use_layer) {
+        /* The layer is alpha-blended by the display hardware over the live
+         * game image, so every pixel needs a real alpha channel. */
+        if (a >= 255) {
+            *d = 0xFF000000u | (rgb & 0xFFFFFFu);
+            return;
+        }
+        uint32_t da = (*d >> 24) & 0xFF;
+        uint32_t oa = (uint32_t)a > da ? (uint32_t)a : da;
+        uint32_t dr = (*d >> 16) & 0xFF, dg = (*d >> 8) & 0xFF, db = *d & 0xFF;
+        uint32_t sr = (rgb >> 16) & 0xFF, sg = (rgb >> 8) & 0xFF, sb = rgb & 0xFF;
+        dr = (sr * a + dr * (255 - a)) / 255;
+        dg = (sg * a + dg * (255 - a)) / 255;
+        db = (sb * a + db * (255 - a)) / 255;
+        *d = (oa << 24) | (dr << 16) | (dg << 8) | db;
+        return;
+    }
     if (a >= 255) {
         *d = rgb;
         return;
@@ -1059,7 +1151,7 @@ static void item_apply(int idx)
 #define PANEL_X      (SCR_W - PANEL_W - 32)
 #define PANEL_TOP    28
 #define PANEL_H      664
-#define ROW_H        35
+#define ROW_H        32
 #define ROW_TOP      (PANEL_TOP + 88)
 
 static void item_value_text(int idx, char *buf, size_t n)
@@ -1144,9 +1236,394 @@ static void draw_confirm(void)
     draw_text(TR(S_CONFIRM_KEYS), SCR_W / 2, y + 132, g_f_mid, 0x9698A2, 1);
 }
 
+/* ------------------------------------------------------------------ */
+/* virtual keyboard                                                    */
+/* ------------------------------------------------------------------ */
+
+/* The panel stays frozen behind this screen but is not drawn while the
+ * keyboard is up. Keys are injected through a dedicated uinput device so the
+ * app under the overlay receives them exactly like physical key presses. */
+#define KB_ROWS      4
+#define KB_CTRL_ROW  4
+#define KB_CTRL_KEYS 5
+#define KB_ROW_TOP   254
+#define KB_ROW_STEP  82
+#define KB_KEY_H     70
+#define KB_KEY_GAP   12
+
+static const char *const g_kb_layout[2][KB_ROWS] = {
+    { "1234567890", "qwertyuiop", "asdfghjkl", "zxcvbnm" },
+    { "!@#$%^&*()", "-_=+[]{}", ";:'\",./?", "\\|~<>" }
+};
+
+static int kb_row_len(int row)
+{
+    if (row == KB_CTRL_ROW)
+        return KB_CTRL_KEYS;
+    return (int)strlen(g_kb_layout[g_kb_symbols ? 1 : 0][row]);
+}
+
+static char kb_char(int row, int col)
+{
+    return g_kb_layout[g_kb_symbols ? 1 : 0][row][col];
+}
+
+/* Linux keycodes are QWERTY-position based, not alphabetical. */
+static const unsigned short g_kb_codes[26] = {
+    KEY_A, KEY_B, KEY_C, KEY_D, KEY_E, KEY_F, KEY_G,
+    KEY_H, KEY_I, KEY_J, KEY_K, KEY_L, KEY_M, KEY_N, KEY_O,
+    KEY_P, KEY_Q, KEY_R, KEY_S, KEY_T, KEY_U, KEY_V,
+    KEY_W, KEY_X, KEY_Y, KEY_Z
+};
+
+static void kb_char_code(char ch, int *code, int *shift)
+{
+    *shift = 0;
+    if (ch >= 'a' && ch <= 'z') {
+        *code = g_kb_codes[ch - 'a'];
+        return;
+    }
+    if (ch >= 'A' && ch <= 'Z') {
+        *code = g_kb_codes[ch - 'A'];
+        *shift = 1;
+        return;
+    }
+    if (ch >= '1' && ch <= '9') {
+        *code = KEY_1 + (ch - '1');
+        return;
+    }
+    if (ch == '0') {
+        *code = KEY_0;
+        return;
+    }
+    switch (ch) {
+    case ' ':  *code = KEY_SPACE; break;
+    case '\n': *code = KEY_ENTER; break;
+    case '\b': *code = KEY_BACKSPACE; break;
+    case '-':  *code = KEY_MINUS; break;
+    case '_':  *code = KEY_MINUS; *shift = 1; break;
+    case '=':  *code = KEY_EQUAL; break;
+    case '+':  *code = KEY_EQUAL; *shift = 1; break;
+    case '[':  *code = KEY_LEFTBRACE; break;
+    case '{':  *code = KEY_LEFTBRACE; *shift = 1; break;
+    case ']':  *code = KEY_RIGHTBRACE; break;
+    case '}':  *code = KEY_RIGHTBRACE; *shift = 1; break;
+    case '\\': *code = KEY_BACKSLASH; break;
+    case '|':  *code = KEY_BACKSLASH; *shift = 1; break;
+    case '`':  *code = KEY_GRAVE; break;
+    case '~':  *code = KEY_GRAVE; *shift = 1; break;
+    case ';':  *code = KEY_SEMICOLON; break;
+    case ':':  *code = KEY_SEMICOLON; *shift = 1; break;
+    case '\'': *code = KEY_APOSTROPHE; break;
+    case '"':  *code = KEY_APOSTROPHE; *shift = 1; break;
+    case ',':  *code = KEY_COMMA; break;
+    case '<':  *code = KEY_COMMA; *shift = 1; break;
+    case '.':  *code = KEY_DOT; break;
+    case '>':  *code = KEY_DOT; *shift = 1; break;
+    case '/':  *code = KEY_SLASH; break;
+    case '?':  *code = KEY_SLASH; *shift = 1; break;
+    case '!':  *code = KEY_1; *shift = 1; break;
+    case '@':  *code = KEY_2; *shift = 1; break;
+    case '#':  *code = KEY_3; *shift = 1; break;
+    case '$':  *code = KEY_4; *shift = 1; break;
+    case '%':  *code = KEY_5; *shift = 1; break;
+    case '^':  *code = KEY_6; *shift = 1; break;
+    case '&':  *code = KEY_7; *shift = 1; break;
+    case '*':  *code = KEY_8; *shift = 1; break;
+    case '(':  *code = KEY_9; *shift = 1; break;
+    case ')':  *code = KEY_0; *shift = 1; break;
+    default:   *code = 0; break;
+    }
+}
+
+static void kb_emit_to(int fd, int code, int val)
+{
+    if (fd < 0)
+        return;
+    struct input_event e;
+    memset(&e, 0, sizeof e);
+    e.type = EV_KEY;
+    e.code = code;
+    e.value = val;
+    if (write(fd, &e, sizeof e) != (ssize_t)sizeof e)
+        return;
+    memset(&e, 0, sizeof e);
+    e.type = EV_SYN;
+    e.code = SYN_REPORT;
+    write(fd, &e, sizeof e);
+}
+
+static void kb_emit(int code, int val)
+{
+    kb_emit_to(g_kbd_fd, code, val);
+    if (g_text_to_gamepad)
+        kb_emit_to(g_gamepad_fd, code, val);
+}
+
+static void kb_inject(char ch)
+{
+    int code = 0, shift = 0;
+    kb_char_code(ch, &code, &shift);
+    if ((g_kbd_fd < 0 && (!g_text_to_gamepad || g_gamepad_fd < 0)) || !code)
+        return;
+    if (shift)
+        kb_emit(KEY_LEFTSHIFT, 1);
+    kb_emit(code, 1);
+    kb_emit(code, 0);
+    if (shift)
+        kb_emit(KEY_LEFTSHIFT, 0);
+}
+
+static void kb_device_open(void)
+{
+    if (g_kbd_fd >= 0)
+        return;
+    /* Prefer the keyboard created by overlayd at startup: games can enumerate
+     * it when they launch, before the overlay is ever opened. */
+    const char *inherited = getenv("OVERLAY_KBD_FD");
+    if (inherited && *inherited) {
+        int fd = atoi(inherited);
+        if (fcntl(fd, F_GETFD) >= 0) {
+            g_kbd_fd = fd;
+            g_kbd_inherited = 1;
+            logm("using inherited virtual keyboard fd %d", fd);
+            return;
+        }
+    }
+    g_kbd_fd = open("/dev/uinput", O_WRONLY | O_NONBLOCK | O_CLOEXEC);
+    if (g_kbd_fd < 0) {
+        logm("cannot open /dev/uinput: %s", strerror(errno));
+        return;
+    }
+    ioctl(g_kbd_fd, UI_SET_EVBIT, EV_KEY);
+    for (unsigned i = 0; i < sizeof g_kb_codes / sizeof g_kb_codes[0]; i++)
+        ioctl(g_kbd_fd, UI_SET_KEYBIT, g_kb_codes[i]);
+    /* KEY_1..KEY_9 are 2..10 and KEY_0 is 11, so iterate low to high. */
+    for (int c = KEY_1; c <= KEY_0; c++)
+        ioctl(g_kbd_fd, UI_SET_KEYBIT, c);
+    static const int extra[] = {
+        KEY_SEMICOLON, KEY_APOSTROPHE, KEY_GRAVE, KEY_COMMA, KEY_DOT,
+        KEY_SLASH, KEY_BACKSLASH, KEY_LEFTBRACE, KEY_RIGHTBRACE,
+        KEY_MINUS, KEY_EQUAL, KEY_SPACE, KEY_ENTER, KEY_BACKSPACE,
+        KEY_LEFTSHIFT
+    };
+    for (unsigned i = 0; i < sizeof extra / sizeof extra[0]; i++)
+        ioctl(g_kbd_fd, UI_SET_KEYBIT, extra[i]);
+
+    struct uinput_user_dev ud;
+    memset(&ud, 0, sizeof ud);
+    snprintf(ud.name, sizeof ud.name, "OverLyder Virtual Keyboard");
+    ud.id.bustype = BUS_VIRTUAL;
+    ud.id.vendor = 0x1234;
+    ud.id.product = 0x5679;
+    ud.id.version = 1;
+    if (write(g_kbd_fd, &ud, sizeof ud) != (ssize_t)sizeof ud ||
+        ioctl(g_kbd_fd, UI_DEV_CREATE) < 0) {
+        logm("uinput keyboard setup failed: %s", strerror(errno));
+        close(g_kbd_fd);
+        g_kbd_fd = -1;
+    }
+}
+
+static void kb_device_close(void)
+{
+    if (g_kbd_fd < 0)
+        return;
+    if (!g_kbd_inherited) {
+        ioctl(g_kbd_fd, UI_DEV_DESTROY);
+        close(g_kbd_fd);
+    }
+    g_kbd_fd = -1;
+    g_kbd_inherited = 0;
+}
+
+static void kb_key_label(int row, int col, char *out, size_t n)
+{
+    if (row == KB_CTRL_ROW) {
+        static const char *const names[KB_CTRL_KEYS] = {
+            "Shift", "", "Space", "Del", "OK"
+        };
+        if (col == 1)
+            snprintf(out, n, "%s", g_kb_symbols ? "ABC" : "123");
+        else
+            snprintf(out, n, "%s", names[col]);
+        return;
+    }
+    char ch = kb_char(row, col);
+    if (g_kb_shift && ch >= 'a' && ch <= 'z')
+        ch = (char)(ch - 32);
+    snprintf(out, n, "%c", ch);
+}
+
+static void kb_backspace(void)
+{
+    size_t l = strlen(g_kb_text);
+    if (l)
+        g_kb_text[l - 1] = '\0';
+    kb_inject('\b');
+    g_dirty = 1;
+}
+
+static void kb_type(char ch)
+{
+    size_t l = strlen(g_kb_text);
+    if (l >= sizeof(g_kb_text) - 1) {
+        memmove(g_kb_text, g_kb_text + 1, l - 1);
+        l--;
+    }
+    g_kb_text[l] = ch;
+    g_kb_text[l + 1] = '\0';
+    kb_inject(ch);
+    g_dirty = 1;
+}
+
+static void kb_close(void)
+{
+    text_save(g_kb_text);
+    g_kb_open = 0;
+    g_kb_closed_at = now_ms();
+    g_sel = I_KEYBOARD; /* land back on the option that opened the keyboard */
+    g_dirty = 1;
+}
+
+static void kb_activate(void)
+{
+    if (g_kb_row == KB_CTRL_ROW) {
+        switch (g_kb_col) {
+        case 0: g_kb_shift = !g_kb_shift; break;
+        case 1: g_kb_symbols = !g_kb_symbols; g_kb_col = 0; break;
+        case 2: kb_type(' '); break;
+        case 3: kb_backspace(); break;
+        case 4: kb_inject('\n'); kb_close(); break;
+        default: break;
+        }
+    } else {
+        char label[8];
+        kb_key_label(g_kb_row, g_kb_col, label, sizeof label);
+        kb_type(label[0]);
+    }
+    g_dirty = 1;
+}
+
+static void kb_move(int vertical, int dir)
+{
+    if (vertical) {
+        int r = clampi(g_kb_row + dir, 0, KB_CTRL_ROW);
+        if (r != g_kb_row) {
+            g_kb_row = r;
+            int n = kb_row_len(r);
+            if (g_kb_col >= n)
+                g_kb_col = n - 1;
+        }
+    } else {
+        int n = kb_row_len(g_kb_row);
+        g_kb_col = (g_kb_col + (dir > 0 ? 1 : -1) + n) % n;
+    }
+    g_dirty = 1;
+}
+
+static void kb_key(int code)
+{
+    /* ignore the tail of the A press that opened the keyboard */
+    if (now_ms() - g_kb_open_at < 250)
+        return;
+    switch (code) {
+    case K_A:      kb_activate(); break;
+    case K_B:      /* back always returns to the overlay */
+    case K_MODE:   kb_close(); break;
+    case K_Y:      g_kb_shift = !g_kb_shift; g_dirty = 1; break;
+    case K_X:      g_kb_symbols = !g_kb_symbols; g_kb_col = 0; g_dirty = 1; break;
+    case K_START:  kb_inject('\n'); kb_close(); break;
+    case K_SELECT: kb_backspace(); break;
+    default: break;
+    }
+}
+
+static void kb_open(void)
+{
+    logm("keyboard opened");
+    g_kb_open = 1;
+    g_kb_open_at = now_ms();
+    g_kb_row = 0;
+    g_kb_col = 0;
+    g_stick_dir = 0;
+    kb_device_open();
+    g_dirty = 1;
+}
+
+static void kb_compose(void)
+{
+    if (g_use_layer) {
+        memset(g_cv, 0, sizeof g_cv);
+        fill_rect_a(0, 0, SCR_W, SCR_H, 0x000000, g_dim * 255 / 100);
+    } else {
+        memcpy(g_cv, g_bg_dim, sizeof g_cv);
+        fill_rect_a(0, 0, SCR_W, SCR_H, 0x000000, 70);
+    }
+
+    draw_text(TR(S_KB_TITLE), SCR_W / 2, 64, g_f_mid, 0xE62037, 1);
+
+    int fx = 80, fy = 112, fw = SCR_W - 160, fh = 84;
+    fill_round_a(fx, fy, fw, fh, 16, 0x14151C, 250);
+    fill_round_a(fx, fy, fw, 3, 2, 0xE62037, 255);
+
+    const char *txt = g_kb_text;
+    size_t l = strlen(txt);
+    if (l > 48)
+        txt += l - 48;
+    char shown[64];
+    snprintf(shown, sizeof shown, "%s", txt);
+    if (!*shown) {
+        draw_text(TR(S_KB_EMPTY), fx + 22, fy + 25, g_f_mid, 0x5F6170, 0);
+    } else {
+        draw_text(shown, fx + 22, fy + 25, g_f_mid, 0xF0F2F8, 0);
+        SDL_Surface *s = cached_surface(g_f_mid, shown, shown, 0xF0F2F8);
+        int cx = fx + 22 + (s ? s->w : 0) + 5;
+        if ((now_ms() / 450) & 1)
+            fill_rect_a(cx, fy + 23, 3, 30, 0xE62037, 255);
+    }
+    if (g_kbd_fd < 0)
+        draw_text(TR(S_KB_UNAVAILABLE), SCR_W / 2, fy + fh + 10,
+                  g_f_small, 0xE62037, 1);
+
+    for (int row = 0; row <= KB_CTRL_ROW; row++) {
+        int n = kb_row_len(row);
+        int kw = (row == KB_CTRL_ROW) ? 176 : 100;
+        int total = n * kw + (n - 1) * KB_KEY_GAP;
+        int sx = (SCR_W - total) / 2;
+        int y = KB_ROW_TOP + row * KB_ROW_STEP;
+        for (int col = 0; col < n; col++) {
+            int x = sx + col * (kw + KB_KEY_GAP);
+            int focused = (row == g_kb_row && col == g_kb_col);
+            int toggled = (row == KB_CTRL_ROW) &&
+                          ((col == 0 && g_kb_shift) || (col == 1 && g_kb_symbols));
+            fill_round_a(x + 3, y + 4, kw, KB_KEY_H, 12, 0x000000, 100);
+            fill_round_a(x, y, kw, KB_KEY_H, 12,
+                         focused ? 0xE62037 : (toggled ? 0x4A2530 : 0x242630), 250);
+            if (focused)
+                fill_round_a(x + 3, y + 3, 4, KB_KEY_H - 6, 2, 0xFFFFFF, 255);
+            char label[8];
+            kb_key_label(row, col, label, sizeof label);
+            draw_text(label, x + kw / 2, y + (KB_KEY_H - 28) / 2,
+                      row == KB_CTRL_ROW ? g_f_small : g_f_mid,
+                      focused ? 0xFFFFFF : 0xD0D2DC, 1);
+        }
+    }
+    draw_text(TR(S_KB_HINT), SCR_W / 2, 686, g_f_small, 0x9698A2, 1);
+}
+
 static void compose(void)
 {
-    memcpy(g_cv, g_bg_dim, sizeof g_cv);
+    if (g_kb_open) {
+        kb_compose();
+        return;
+    }
+    if (g_use_layer) {
+        memset(g_cv, 0, sizeof g_cv);
+        fill_rect_a(0, 0, SCR_W, SCR_H, 0x000000, g_dim * 255 / 100);
+    } else {
+        memcpy(g_cv, g_bg_dim, sizeof g_cv);
+    }
 
     time_t t = time(NULL);
     struct tm tmv;
@@ -1231,6 +1708,9 @@ static void compose(void)
     fill_round_a(px + 20, PANEL_TOP + PANEL_H - 46, PANEL_W - 40, 34, 10, 0x1A1B22, 255);
     if (SEL_IS_RADIO(g_sel))
         draw_text(TR(S_HINT_RADIO),
+                  px + PANEL_W / 2, PANEL_TOP + PANEL_H - 38, g_f_small, 0xB0B2BC, 1);
+    else if (items[g_sel].action == ACT_KEYBOARD)
+        draw_text(TR(S_HINT_KEYBOARD),
                   px + PANEL_W / 2, PANEL_TOP + PANEL_H - 38, g_f_small, 0xB0B2BC, 1);
     else if (items[g_sel].kind == IT_SLIDER || items[g_sel].kind == IT_TOGGLE)
         draw_text(TR(S_HINT_SLIDER),
@@ -1709,7 +2189,7 @@ static void upd_check(void)
     g_upd_latest[0] = '\0';
     g_dirty = 1;
     config_compose();
-    fb_flip();
+    display_flip();
     upd_run("check", g_manifest.version);
     g_dirty = 1;
 }
@@ -1719,7 +2199,7 @@ static void upd_install(void)
     g_upd_state = UPD_INSTALLING;
     g_dirty = 1;
     config_compose();
-    fb_flip();
+    display_flip();
     upd_run("install", g_upd_latest);
     g_dirty = 1;
 }
@@ -1769,7 +2249,9 @@ static void do_close(int code)
 
 static int read_stopped_pids(pid_t *out, int max)
 {
-    FILE *f = fopen(STOPPED_FILE, "r");
+    FILE *f = fopen(TARGETS_FILE, "r");
+    if (!f)
+        f = fopen(STOPPED_FILE, "r");
     if (!f)
         return 0;
     int n = 0, pid;
@@ -1821,7 +2303,7 @@ static void do_exit_game(void)
 
     g_busy = 1;
     compose();
-    fb_flip();
+    display_flip();
 
     logm("closing game (%d pids)", n);
     for (int i = 0; i < n; i++)
@@ -1897,6 +2379,10 @@ static void horiz_move(int dir)
     }
     if (g_mode_cfg && g_upd_state != UPD_NONE)
         return; /* no invisible config cursor movement behind the updater */
+    if (g_kb_open) {
+        kb_move(0, dir);
+        return;
+    }
     if (g_mode_cfg)
         cfg_move(dir);
     else if (!g_confirm) {
@@ -1919,6 +2405,10 @@ static void vert_move(int dir)
     }
     if (g_mode_cfg && g_upd_state != UPD_NONE)
         return;
+    if (g_kb_open) {
+        kb_move(1, dir);
+        return;
+    }
     if (g_mode_cfg)
         cfg_move(dir);
     else if (!g_confirm)
@@ -1968,6 +2458,8 @@ static void activate(void)
     }
 
     item_t *it = &items[g_sel];
+    if (g_debug)
+        logm("activate sel=%d kind=%d action=%d", g_sel, it->kind, it->action);
     if (it->kind == IT_SLIDER)
         return; /* sliders are changed directly with < > */
     if (it->kind == IT_TOGGLE) {
@@ -1976,6 +2468,10 @@ static void activate(void)
     }
     if (it->action == ACT_CLOSE) {
         do_close(EXIT_CLOSE);
+        return;
+    }
+    if (it->action == ACT_KEYBOARD) {
+        kb_open();
         return;
     }
     if (it->action == ACT_EXIT_GAME && !g_has_game)
@@ -1992,6 +2488,10 @@ static void activate(void)
 
 static void go_back(void)
 {
+    if (g_kb_open) {
+        kb_close();
+        return;
+    }
     if (g_confirm) {
         g_confirm = ACT_NONE;
         return;
@@ -2012,6 +2512,10 @@ static void on_term(int sig)
         while (fscanf(f, "%d", &pid) == 1)
             kill(pid, SIGCONT);
         fclose(f);
+    }
+    if (g_use_layer) {
+        overlay_layer_hide(&g_layer);
+        unlink(LAYER_FLAG);
     }
     _exit(99);
 }
@@ -2056,17 +2560,35 @@ int main(int argc, char **argv)
     const char *hg = getenv("OVERLAY_HAS_GAME");
     g_has_game = hg && atoi(hg);
     g_debug = getenv("OVERLAY_DEBUG") != NULL;
+    g_text_to_gamepad = getenv("OVERLAY_TEXT_TO_GAMEPAD") != NULL;
 
     signal(SIGTERM, on_term);
     signal(SIGINT, on_term);
     signal(SIGHUP, on_term);
 
-    if (overlay_fb_open() < 0) {
+    const char *nos = getenv("OVERLAY_NO_SIGSTOP");
+    if (!g_mode_cfg && nos && atoi(nos)) {
+        if (overlay_layer_open(&g_layer, SCR_W, SCR_H) == 0) {
+            g_use_layer = 1;
+            overlay_layer_show(&g_layer);
+            FILE *flag = fopen(LAYER_FLAG, "w");
+            if (flag) {
+                fprintf(flag, "%d %u\n", (int)getpid(), g_layer.channel);
+                fclose(flag);
+            }
+        } else {
+            logm("no hardware layer available; falling back to framebuffer");
+        }
+    }
+
+    if (overlay_fb_open() < 0 && !g_use_layer) {
         logm("cannot open framebuffer");
         return EXIT_FAILED;
     }
-    fb_capture(g_bg);
-    prepare_background();
+    if (!g_use_layer) {
+        fb_capture(g_bg);
+        prepare_background();
+    }
 
     SDL_Init(0);
     if (TTF_Init() != 0) {
@@ -2096,6 +2618,7 @@ int main(int argc, char **argv)
     if (evfd < 0) {
         logm("no input device (%s)", dev);
     } else {
+        g_gamepad_fd = evfd;
         /* exclusive access while the overlay is up: the (paused) game must
          * not receive the buttons we use to navigate */
         if (ioctl(evfd, EVIOCGRAB, 1) < 0)
@@ -2115,6 +2638,7 @@ int main(int argc, char **argv)
     long last_refresh = 0;
     long last_bl_refresh = 0;
     long last_radio_refresh = 0;
+    long last_kb_blink = 0;
 
     g_open_at = now_ms();
     g_anim_start = g_open_at;
@@ -2134,6 +2658,18 @@ int main(int argc, char **argv)
                     if (g_debug)
                         logm("ev type=%d code=%d value=%d", e->type, e->code, e->value);
                     if (g_busy || g_closing)
+                        continue;
+                    /* keyboard mode owns all button presses: B/Home go back to
+                     * the overlay, A types, the rest are keyboard shortcuts. */
+                    if (g_kb_open && e->type == EV_KEY) {
+                        if (e->value == 1)
+                            kb_key(e->code);
+                        g_dirty = 1;
+                        continue;
+                    }
+                    /* brief grace after returning so a held B/Enter does not
+                     * immediately navigate (or close) the overlay again */
+                    if (!g_mode_cfg && now_ms() - g_kb_closed_at < 400)
                         continue;
                     if (e->type == EV_KEY && e->value == 0) {
                         g_trigger_held &= ~(1 << (e->code & 31));
@@ -2274,6 +2810,10 @@ int main(int argc, char **argv)
         }
 
         long now = now_ms();
+        if (g_kb_open && now - last_kb_blink > 400) {
+            last_kb_blink = now;
+            g_dirty = 1; /* blink the text cursor */
+        }
         if (g_mode_cfg && g_learning && g_learn_mask && now - g_learn_at > 2500) {
             learn_finish();
             g_dirty = 1;
@@ -2282,15 +2822,15 @@ int main(int argc, char **argv)
             last_clock = now;
             g_dirty = 1;
         }
-        if (!g_mode_cfg && !g_closing && now - last_refresh > 300) {
+        if (!g_mode_cfg && !g_closing && !g_kb_open && now - last_refresh > 300) {
             last_refresh = now;
             item_refresh_volume();
         }
-        if (!g_mode_cfg && !g_closing && now - last_bl_refresh > 1000) {
+        if (!g_mode_cfg && !g_closing && !g_kb_open && now - last_bl_refresh > 1000) {
             last_bl_refresh = now;
             item_refresh_brightness();
         }
-        if (!g_mode_cfg && !g_closing && now - last_radio_refresh > 2000) {
+        if (!g_mode_cfg && !g_closing && !g_kb_open && now - last_radio_refresh > 2000) {
             int w = wifi_state_get(), b = bt_state_get();
             last_radio_refresh = now;
             if (w != g_wifi_on || b != g_bt_on) {
@@ -2309,7 +2849,7 @@ int main(int argc, char **argv)
                 config_compose();
             else
                 compose();
-            fb_flip();
+            display_flip();
             g_dirty = 0;
         }
 
@@ -2317,8 +2857,14 @@ int main(int argc, char **argv)
         usleep((!g_mode_cfg && (now - g_anim_start < ANIM_MS || g_closing)) ? 3000 : 6000);
     }
 
-    if (!g_keep_overlay)
+    kb_device_close();
+    if (g_use_layer) {
+        overlay_layer_hide(&g_layer);
+        overlay_layer_close(&g_layer);
+        unlink(LAYER_FLAG);
+    } else if (!g_keep_overlay) {
         fb_restore();
+    }
     if (evfd >= 0) {
         ioctl(evfd, EVIOCGRAB, 0);
         close(evfd);

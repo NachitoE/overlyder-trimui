@@ -29,12 +29,14 @@
 #define DISABLE_FLAG    "/mnt/SDCARD/System/etc/overlay.disabled"
 #define PID_FILE        "/tmp/overlayd.pid"
 #define STOPPED_FILE    "/tmp/overlay_stopped.pids"
+#define TARGETS_FILE    "/tmp/overlay_targets.pids"
 #define LOG_FILE        "/tmp/overlayd.log"
 #define FONT_PATH       "/mnt/SDCARD/System/resources/DejaVuSans.ttf"
 #define SYSTEMVAL_BIN   "/usr/trimui/bin/systemval"
 #define SHMVAR_BIN      "/usr/trimui/bin/shmvar"
 #define DISP_ATTR       "/sys/class/disp/disp/attr/"
 #define LED_SYS         "/sys/class/led_anim/"
+#define LAYER_FLAG      "/tmp/overlay_layer_active"
 
 /* Runtime metadata (version + updater source) lives in manifest.json so it
  * can be changed without rebuilding the binaries. */
@@ -77,6 +79,7 @@ typedef struct {
     uint32_t led_color;   /* 0xRRGGBB static LED color */
     int led_color_set;    /* 1 = a color was configured */
     int upd_reinstall;    /* 1 = allow reinstalling the installed version */
+    int no_sigstop;       /* 1 = keep the game running, use a disp layer */
 } overlay_cfg;
 
 void cfg_defaults(overlay_cfg *c);
@@ -85,6 +88,9 @@ void cfg_update_led_color(overlay_cfg *c, uint32_t rgb, int enabled);
 void cfg_update_reinstall(overlay_cfg *c, int enabled);
 uint32_t led_hue_rgb(int hue);
 void led_color_apply(uint32_t rgb);
+
+/* Optional virtual keyboard (in-process, no external binary). */
+int text_inject(const char *text, int gamepad_fd);
 
 long now_ms(void);
 void logm(const char *fmt, ...);

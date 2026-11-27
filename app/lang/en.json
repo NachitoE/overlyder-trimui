@@ -81,5 +81,8 @@
   "S_KB_HINT": "^ v / < >: Move   A: Type   B: Back   Y: Shift   X: 123   START: Enter   SELECT: Del",
   "S_KB_EMPTY": "Type here...",
   "S_KB_UNAVAILABLE": "System keyboard unavailable",
-  "S_CFG_SIGSTOP": "Layer, no SIGSTOP"
+  "S_CFG_SIGSTOP": "SIGSTOP",
+  "S_CFG_KBMODE": "Keyboard mode",
+  "S_KB_FULL": "Full",
+  "S_KB_COMPACT": "Compact"
 }

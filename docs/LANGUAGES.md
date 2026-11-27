@@ -9,18 +9,29 @@ app/lang/en.json    English
 app/lang/pt.json    Portuguese
 ```
 
-The C source no longer contains translated text. `src/overlay_ui.c` only holds
-the **schema** — the list of key names (`g_tr_keys[]`, one entry per `S_*`
-enum value) — and a runtime table (`g_tr_values[S_COUNT][256]`) filled from the
-JSON file at startup. `TR(S_KEY)` therefore reads the loaded string, not a
-compiled-in literal.
+There is a **single source of truth for the keys**:
+`app/lang/keys.json`, a JSON array of every `S_*` key name. `src/lang_keys.h`
+is generated from it by `scripts/gen_lang.py` and contains the `S_*` enum plus
+the `g_tr_keys[]` array. No key is written twice by hand. `src/overlay_ui.c`
+includes that generated header and only keeps a runtime table
+(`g_tr_values[S_COUNT][256]`), filled from the language JSON at startup.
+`TR(S_KEY)` therefore reads the loaded string, not a compiled-in literal.
+
+Whenever `keys.json` changes, run:
+
+```sh
+python scripts/gen_lang.py
+```
+
+This regenerates `src/lang_keys.h` and adds/removes keys in all three language
+files (existing translations are preserved; new keys start as empty strings —
+fill them in afterwards).
 
 ## JSON format
 
 Each file is a single flat object: `"S_KEY": "translated text"`. Keys match the
-`S_*` enum identifiers exactly, so adding/reordering a string means editing the
-enum and the key array in `src/overlay_ui.c` and adding the same key to every
-JSON file.
+entries in `app/lang/keys.json` exactly. To add a string, add its key there,
+run `scripts/gen_lang.py`, then fill the new value in the three files.
 
 Example (`app/lang/en.json`):
 
@@ -60,14 +71,15 @@ is written as `lang=es|en|pt` in `overlay.cfg` when settings are saved.
 
 ## Adding a new language
 
-1. Add an entry to the `S_*` language enum only if a new string is needed.
-2. Add the key to `g_tr_keys[]` in `src/overlay_ui.c`.
-3. Add a `LANG_*` enum value, bump `NLANG`, append the code to
-   `g_lang_codes[]` and `LANG_NAME()` in `src/overlay_ui.c`, and accept the new
-   `lang=` value in `cfg_load()` in `src/util.c`.
-4. Create `app/lang/<code>.json` with **all** keys from `g_tr_keys[]`.
-5. Add the file to `install.sh` and to the release package in
-   `scripts/build-win.ps1`.
+1. Add the new key to `app/lang/keys.json` (the central list).
+2. Run `python scripts/gen_lang.py` — this regenerates `src/lang_keys.h` and
+   adds the key to `es/en/pt.json`.
+3. Fill the translated value in each `app/lang/<code>.json`.
+4. For a whole new language: add a `LANG_*` enum value, bump `NLANG`, append
+   its code to `g_lang_codes[]` and `LANG_NAME()` in `src/overlay_ui.c`, accept
+   the new `lang=` value in `cfg_load()` in `src/util.c`, add the code to
+   `LANGS` in `scripts/gen_lang.py`, and add the file to `install.sh` and to
+   the release package in `scripts/build-win.ps1`.
 
 ## Packaging / install
 

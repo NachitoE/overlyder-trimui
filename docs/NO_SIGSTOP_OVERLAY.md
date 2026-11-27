@@ -112,9 +112,11 @@ orientation.
 ## 3. Choosing between SIGSTOP and no-SIGSTOP
 
 Both modes are in the same binaries; selection is via
-`/mnt/SDCARD/System/etc/overlay.cfg`, or from the **Capa sin SIGSTOP** /
-**Layer, no SIGSTOP** row in the CrossMix app settings (Sí = layer, No =
-SIGSTOP). The app writes the file and restarts the daemon on exit:
+`/mnt/SDCARD/System/etc/overlay.cfg`, or from the **SIGSTOP** row in the
+CrossMix app settings: **Sí** = freeze the game (classic), **No** = keep it
+running on a hardware layer. The app writes the file and restarts the daemon
+on exit. Note the config key is named `no_sigstop`, so it has the opposite
+polarity to the visible option: `no_sigstop=1` shows as "SIGSTOP: No".
 
 ```
 # 1 = hardware layer, game keeps running (default)

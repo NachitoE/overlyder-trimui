@@ -80,6 +80,7 @@ typedef struct {
     int led_color_set;    /* 1 = a color was configured */
     int upd_reinstall;    /* 1 = allow reinstalling the installed version */
     int no_sigstop;       /* 1 = keep the game running, use a disp layer */
+    int keyboard_mode;    /* 1 = full keyboard with input box, 2 = compact */
 } overlay_cfg;
 
 void cfg_defaults(overlay_cfg *c);

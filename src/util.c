@@ -222,6 +222,7 @@ void cfg_defaults(overlay_cfg *c)
     c->led_color_set = 0; /* do not override CrossMix LED presets by default */
     c->upd_reinstall = 0; /* never reinstall the same version unless asked */
     c->no_sigstop = 1;    /* draw on a hardware layer, leave the game running */
+    c->keyboard_mode = 2; /* compact keyboard by default */
 }
 
 static void trim(char *s)
@@ -295,6 +296,9 @@ int cfg_load(overlay_cfg *c)
             c->upd_reinstall = atoi(v) ? 1 : 0;
         } else if (!strcasecmp(k, "no_sigstop")) {
             c->no_sigstop = atoi(v) ? 1 : 0;
+        } else if (!strcasecmp(k, "keyboard_mode")) {
+            int m = atoi(v);
+            c->keyboard_mode = (m == 1 || m == 2) ? m : 2;
         } else if (!strcasecmp(k, "ledcolor")) {
             const char *hex = v;
             if (*hex == '#')

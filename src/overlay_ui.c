@@ -126,6 +126,20 @@ static long g_kb_open_at = 0;
 static long g_kb_closed_at = 0;
 static char g_kb_text[128];
 static int g_kb_shift = 0;
+static int g_kb_mode = 2;  /* 1 = full with input box, 2 = compact */
+
+/* Compact keyboard position/size. Movable with the right stick. */
+#define KB2_W        720
+#define KB2_H        248
+#define KB2_ROW_TOP  26
+#define KB2_ROW_STEP 40
+#define KB2_KEY_H    36
+#define KB2_KEY_W    64
+#define KB2_CTRL_W   100
+#define KB2_GAP      5
+static int g_kb_x = (SCR_W - KB2_W) / 2;
+static int g_kb_y = SCR_H - KB2_H - 40;
+static int g_rx = 0, g_ry = 0, g_rstick_max = 0;
 static int g_kb_symbols = 0;
 static int g_kb_row = 0, g_kb_col = 0;
 static int g_kbd_fd = -1;               /* uinput virtual keyboard */
@@ -140,7 +154,7 @@ static int g_text_to_gamepad = 0;       /* OVERLAY_TEXT_TO_GAMEPAD=1 */
 enum {
     CFG_ESTADO = 0, CFG_GATILLO,
     CFG_K1, CFG_K2, CFG_K3, CFG_K4,
-    CFG_UMBRAL, CFG_CONFIRMAR, CFG_IDIOMA, CFG_SIGSTOP,
+    CFG_UMBRAL, CFG_CONFIRMAR, CFG_IDIOMA, CFG_SIGSTOP, CFG_KBMODE,
     CFG_LEARN, CFG_RESET, CFG_ABOUT, CFG_UPDATE, CFG_LISTO, NCFG
 };
 
@@ -185,6 +199,7 @@ static int g_cfg_preset = 0;
 static int g_cfg_hold = 1;
 static int g_cfg_confirm = 1;
 static int g_cfg_sigstop = 1;  /* 1 = hardware layer, 0 = SIGSTOP */
+static int g_cfg_kb_mode = 2;  /* 1 = full, 2 = compact */
 static int g_custom[4] = { 1, 0, 0, 0 }; /* indices into g_keys */
 static int g_learning = 0;
 static int g_learn_mask = 0;
@@ -229,54 +244,9 @@ static void upd_install(void);
 enum { LANG_ES = 0, LANG_EN, LANG_PT, NLANG };
 static int g_lang = LANG_ES;
 
-enum {
-    S_AJUSTES, S_HINT_CLOSE,
-    S_VOL, S_BRI, S_CON, S_EXP, S_SAT, S_TMP,
-    S_PLAY, S_EXIT, S_REBOOT, S_POWER, S_KEYBOARD,
-    S_ACCEPT, S_DISABLED_TXT, S_HINT_SLIDER, S_HINT_ACTION, S_HINT_KEYBOARD,
-    S_CONFIRM_EXIT, S_CONFIRM_REBOOT, S_CONFIRM_POWER, S_CONFIRM_KEYS, S_BUSY,
-    S_CFG_SUBTITLE, S_CFG_ESTADO, S_CFG_GATILLO, S_CFG_UMBRAL,
-    S_CFG_CONFIRMAR, S_CFG_LISTO, S_CFG_IDIOMA, S_KEYFMT,
-    S_ENABLED, S_DISABLED_VAL, S_SI, S_NO, S_NONE,
-    S_PRESET_HOLD_HOME, S_PRESET_HOME_SELECT, S_PRESET_HOME_START, S_PRESET_L1R1,
-    S_PRESET_HOLD_SELECT, S_PRESET_HOLD_START, S_PRESET_CUSTOM,
-    S_CFG_FOOTER,
-    S_LED, S_LED_BRI, S_LED_COLOR, S_MUTE, S_ON, S_OFF,
-    S_LEARN, S_RESET, S_ABOUT, S_LEARN_TITLE, S_ABOUT_TEXT, S_ABOUT_HINT,
-    S_UPDATE, S_UPDATE_TITLE, S_UPDATE_LOCAL, S_UPDATE_LATEST,
-    S_UPDATE_CHECKING, S_UPDATE_UPTODATE, S_UPDATE_AVAILABLE, S_UPDATE_ERROR,
-    S_UPDATE_CONFIRM, S_UPDATE_INSTALLING, S_UPDATE_INSTALLED, S_UPDATE_BACK,
-    S_WIFI, S_BT, S_HINT_RADIO,
-    S_UPDATE_OPTIONS, S_UPDATE_REINSTALL, S_UPDATE_HINT, S_UPDATE_BACK_ROW,
-    S_UPDATE_OPTIONS_HINT, S_UPDATE_SAME_AVAIL, S_UPDATE_SAME_CONFIRM,
-    S_KB_TITLE, S_KB_HINT, S_KB_EMPTY, S_KB_UNAVAILABLE, S_CFG_SIGSTOP, S_COUNT
-};
-
-/* Translation values live in app/lang/<code>.json. This array holds the
- * schema (the key names) and g_tr_values holds the loaded strings. */
-static const char *const g_tr_keys[S_COUNT] = {
-    "S_AJUSTES", "S_HINT_CLOSE", "S_VOL", "S_BRI",
-    "S_CON", "S_EXP", "S_SAT", "S_TMP",
-    "S_PLAY", "S_EXIT", "S_REBOOT", "S_POWER",
-    "S_KEYBOARD", "S_ACCEPT", "S_DISABLED_TXT", "S_HINT_SLIDER",
-    "S_HINT_ACTION", "S_HINT_KEYBOARD", "S_CONFIRM_EXIT", "S_CONFIRM_REBOOT",
-    "S_CONFIRM_POWER", "S_CONFIRM_KEYS", "S_BUSY", "S_CFG_SUBTITLE",
-    "S_CFG_ESTADO", "S_CFG_GATILLO", "S_CFG_UMBRAL", "S_CFG_CONFIRMAR",
-    "S_CFG_LISTO", "S_CFG_IDIOMA", "S_KEYFMT", "S_ENABLED",
-    "S_DISABLED_VAL", "S_SI", "S_NO", "S_NONE",
-    "S_PRESET_HOLD_HOME", "S_PRESET_HOME_SELECT", "S_PRESET_HOME_START", "S_PRESET_L1R1",
-    "S_PRESET_HOLD_SELECT", "S_PRESET_HOLD_START", "S_PRESET_CUSTOM", "S_CFG_FOOTER",
-    "S_LED", "S_LED_BRI", "S_LED_COLOR", "S_MUTE",
-    "S_ON", "S_OFF", "S_LEARN", "S_RESET",
-    "S_ABOUT", "S_LEARN_TITLE", "S_ABOUT_TEXT", "S_ABOUT_HINT",
-    "S_UPDATE", "S_UPDATE_TITLE", "S_UPDATE_LOCAL", "S_UPDATE_LATEST",
-    "S_UPDATE_CHECKING", "S_UPDATE_UPTODATE", "S_UPDATE_AVAILABLE", "S_UPDATE_ERROR",
-    "S_UPDATE_CONFIRM", "S_UPDATE_INSTALLING", "S_UPDATE_INSTALLED", "S_UPDATE_BACK",
-    "S_WIFI", "S_BT", "S_HINT_RADIO", "S_UPDATE_OPTIONS",
-    "S_UPDATE_REINSTALL", "S_UPDATE_HINT", "S_UPDATE_BACK_ROW", "S_UPDATE_OPTIONS_HINT",
-    "S_UPDATE_SAME_AVAIL", "S_UPDATE_SAME_CONFIRM", "S_KB_TITLE", "S_KB_HINT",
-    "S_KB_EMPTY", "S_KB_UNAVAILABLE", "S_CFG_SIGSTOP",
-};
+/* Language keys and the S_* enum are generated from app/lang/keys.json.
+ * See scripts/gen_lang.py and docs/LANGUAGES.md. */
+#include "lang_keys.h"
 static char g_tr_values[S_COUNT][256];
 
 #define TR(id) (g_tr_values[(id)][0] ? g_tr_values[(id)] : g_tr_keys[(id)])
@@ -1493,6 +1463,30 @@ static void kb_move(int vertical, int dir)
     g_dirty = 1;
 }
 
+/* Right stick moves the compact keyboard inside the screen bounds. */
+static void kb_move_panel(void)
+{
+    if (!g_kb_open || g_kb_mode != 2 || g_rstick_max <= 0)
+        return;
+    int dx = 0, dy = 0;
+    int dead = g_rstick_max / 5;
+    if (abs(g_rx) > dead)
+        dx = (int)(((long)g_rx * 12L) / g_rstick_max);
+    if (abs(g_ry) > dead)
+        dy = (int)(((long)g_ry * 12L) / g_rstick_max);
+    if (!dx && !dy)
+        return;
+    int nx = clampi(g_kb_x + dx, 0, SCR_W - KB2_W);
+    int ny = clampi(g_kb_y + dy, 0, SCR_H - KB2_H);
+    if (nx != g_kb_x || ny != g_kb_y) {
+        g_kb_x = nx;
+        g_kb_y = ny;
+        g_dirty = 1;
+        if (g_debug)
+            logm("kb panel %d,%d (rx=%d ry=%d)", g_kb_x, g_kb_y, g_rx, g_ry);
+    }
+}
+
 static void kb_key(int code)
 {
     /* ignore the tail of the A press that opened the keyboard */
@@ -1518,69 +1512,105 @@ static void kb_open(void)
     g_kb_row = 0;
     g_kb_col = 0;
     g_stick_dir = 0;
+    if (g_kb_mode == 2) {
+        g_kb_x = (SCR_W - KB2_W) / 2;
+        g_kb_y = SCR_H - KB2_H - 40;
+        g_rx = g_ry = 0;
+    }
     kb_device_open();
     g_dirty = 1;
 }
 
-static void kb_compose(void)
+static void kb_draw_keys(int px, int py, int pw, int row_top, int row_step,
+                         int key_h, int key_w, int ctrl_w, int gap)
 {
-    if (g_use_layer) {
-        memset(g_cv, 0, sizeof g_cv);
-        fill_rect_a(0, 0, SCR_W, SCR_H, 0x000000, g_dim * 255 / 100);
-    } else {
-        memcpy(g_cv, g_bg_dim, sizeof g_cv);
-        fill_rect_a(0, 0, SCR_W, SCR_H, 0x000000, 70);
-    }
-
-    draw_text(TR(S_KB_TITLE), SCR_W / 2, 64, g_f_mid, 0xE62037, 1);
-
-    int fx = 80, fy = 112, fw = SCR_W - 160, fh = 84;
-    fill_round_a(fx, fy, fw, fh, 16, 0x14151C, 250);
-    fill_round_a(fx, fy, fw, 3, 2, 0xE62037, 255);
-
-    const char *txt = g_kb_text;
-    size_t l = strlen(txt);
-    if (l > 48)
-        txt += l - 48;
-    char shown[64];
-    snprintf(shown, sizeof shown, "%s", txt);
-    if (!*shown) {
-        draw_text(TR(S_KB_EMPTY), fx + 22, fy + 25, g_f_mid, 0x5F6170, 0);
-    } else {
-        draw_text(shown, fx + 22, fy + 25, g_f_mid, 0xF0F2F8, 0);
-        SDL_Surface *s = cached_surface(g_f_mid, shown, shown, 0xF0F2F8);
-        int cx = fx + 22 + (s ? s->w : 0) + 5;
-        if ((now_ms() / 450) & 1)
-            fill_rect_a(cx, fy + 23, 3, 30, 0xE62037, 255);
-    }
-    if (g_kbd_fd < 0)
-        draw_text(TR(S_KB_UNAVAILABLE), SCR_W / 2, fy + fh + 10,
-                  g_f_small, 0xE62037, 1);
-
     for (int row = 0; row <= KB_CTRL_ROW; row++) {
         int n = kb_row_len(row);
-        int kw = (row == KB_CTRL_ROW) ? 176 : 100;
-        int total = n * kw + (n - 1) * KB_KEY_GAP;
-        int sx = (SCR_W - total) / 2;
-        int y = KB_ROW_TOP + row * KB_ROW_STEP;
+        int kw = (row == KB_CTRL_ROW) ? ctrl_w : key_w;
+        int total = n * kw + (n - 1) * gap;
+        int sx = px + (pw - total) / 2;
+        int y = py + row_top + row * row_step;
         for (int col = 0; col < n; col++) {
-            int x = sx + col * (kw + KB_KEY_GAP);
+            int x = sx + col * (kw + gap);
             int focused = (row == g_kb_row && col == g_kb_col);
             int toggled = (row == KB_CTRL_ROW) &&
                           ((col == 0 && g_kb_shift) || (col == 1 && g_kb_symbols));
-            fill_round_a(x + 3, y + 4, kw, KB_KEY_H, 12, 0x000000, 100);
-            fill_round_a(x, y, kw, KB_KEY_H, 12,
+            fill_round_a(x + 3, y + 4, kw, key_h, 12, 0x000000, 100);
+            fill_round_a(x, y, kw, key_h, 12,
                          focused ? 0xE62037 : (toggled ? 0x4A2530 : 0x242630), 250);
             if (focused)
-                fill_round_a(x + 3, y + 3, 4, KB_KEY_H - 6, 2, 0xFFFFFF, 255);
+                fill_round_a(x + 3, y + 3, 4, key_h - 6, 2, 0xFFFFFF, 255);
             char label[8];
             kb_key_label(row, col, label, sizeof label);
-            draw_text(label, x + kw / 2, y + (KB_KEY_H - 28) / 2,
+            draw_text(label, x + kw / 2, y + ((key_h - 28) > 0 ? (key_h - 28) / 2 : 0),
                       row == KB_CTRL_ROW ? g_f_small : g_f_mid,
                       focused ? 0xFFFFFF : 0xD0D2DC, 1);
         }
     }
-    draw_text(TR(S_KB_HINT), SCR_W / 2, 686, g_f_small, 0x9698A2, 1);
+}
+
+static void kb_compose(void)
+{
+    if (g_kb_mode == 1) {
+        /* Full keyboard: dims the whole screen and shows an input box. */
+        if (g_use_layer) {
+            memset(g_cv, 0, sizeof g_cv);
+            fill_rect_a(0, 0, SCR_W, SCR_H, 0x000000, g_dim * 255 / 100);
+        } else {
+            memcpy(g_cv, g_bg_dim, sizeof g_cv);
+            fill_rect_a(0, 0, SCR_W, SCR_H, 0x000000, 70);
+        }
+        draw_text(TR(S_KB_TITLE), SCR_W / 2, 64, g_f_mid, 0xE62037, 1);
+
+        int fx = 80, fy = 112, fw = SCR_W - 160, fh = 84;
+        fill_round_a(fx, fy, fw, fh, 16, 0x14151C, 250);
+        fill_round_a(fx, fy, fw, 3, 2, 0xE62037, 255);
+
+        const char *txt = g_kb_text;
+        size_t l = strlen(txt);
+        if (l > 48)
+            txt += l - 48;
+        char shown[64];
+        snprintf(shown, sizeof shown, "%s", txt);
+        if (!*shown) {
+            draw_text(TR(S_KB_EMPTY), fx + 22, fy + 25, g_f_mid, 0x5F6170, 0);
+        } else {
+            draw_text(shown, fx + 22, fy + 25, g_f_mid, 0xF0F2F8, 0);
+            SDL_Surface *s = cached_surface(g_f_mid, shown, shown, 0xF0F2F8);
+            int cx = fx + 22 + (s ? s->w : 0) + 5;
+            if ((now_ms() / 450) & 1)
+                fill_rect_a(cx, fy + 23, 3, 30, 0xE62037, 255);
+        }
+        if (g_kbd_fd < 0)
+            draw_text(TR(S_KB_UNAVAILABLE), SCR_W / 2, fy + fh + 10,
+                      g_f_small, 0xE62037, 1);
+        kb_draw_keys(0, 0, SCR_W, KB_ROW_TOP, KB_ROW_STEP, KB_KEY_H,
+                     100, 176, KB_KEY_GAP);
+        draw_text(TR(S_KB_HINT), SCR_W / 2, 686, g_f_small, 0x9698A2, 1);
+        return;
+    }
+
+    /* Compact keyboard: small floating panel, no dim, no input box. It can be
+     * moved anywhere on screen with the right stick; position is clamped to
+     * the screen bounds. Keys go straight into the app. */
+    if (g_use_layer)
+        memset(g_cv, 0, sizeof g_cv);
+    else
+        memcpy(g_cv, g_bg, sizeof g_cv);
+
+    fill_round_a(g_kb_x + 4, g_kb_y + 6, KB2_W, KB2_H, 16, 0x000000, 110);
+    fill_round_a(g_kb_x, g_kb_y, KB2_W, KB2_H, 16, 0x14151C, 225);
+    fill_round_a(g_kb_x, g_kb_y, KB2_W, 3, 2, 0xE62037, 255);
+    draw_text(TR(S_KB_TITLE), g_kb_x + KB2_W / 2, g_kb_y + 4,
+              g_f_small, 0xE62037, 1);
+    kb_draw_keys(g_kb_x, g_kb_y, KB2_W, KB2_ROW_TOP, KB2_ROW_STEP,
+                 KB2_KEY_H, KB2_KEY_W, KB2_CTRL_W, KB2_GAP);
+    if (g_kbd_fd < 0)
+        draw_text(TR(S_KB_UNAVAILABLE), g_kb_x + KB2_W / 2, g_kb_y + 224,
+                  g_f_small, 0xE62037, 1);
+    else
+        draw_text(TR(S_KB_HINT), g_kb_x + KB2_W / 2, g_kb_y + 224,
+                  g_f_small, 0x9698A2, 1);
 }
 
 static void compose(void)
@@ -1740,6 +1770,7 @@ static void config_load(void)
     g_cfg_enabled = (access(DISABLE_FLAG, F_OK) != 0);
     g_cfg_confirm = g_cfg.confirm_exit;
     g_cfg_sigstop = g_cfg.no_sigstop;
+    g_cfg_kb_mode = g_cfg.keyboard_mode;
     g_cfg_preset = 0;
     int found = 0;
     for (int p = 0; p < NPRESETS; p++) {
@@ -1817,6 +1848,7 @@ static void config_save(void)
         fprintf(f, "step=%d\n", g_cfg.step);
         fprintf(f, "confirm_exit=%d\n", g_cfg_confirm ? 1 : 0);
         fprintf(f, "no_sigstop=%d\n", g_cfg_sigstop ? 1 : 0);
+        fprintf(f, "keyboard_mode=%d\n", g_cfg_kb_mode);
         fprintf(f, "lang=%s\n", g_lang == LANG_EN ? "en" : (g_lang == LANG_PT ? "pt" : "es"));
         fprintf(f, "upd_reinstall=%d\n", g_cfg.upd_reinstall ? 1 : 0);
         if (g_cfg.led_color_set)
@@ -1883,6 +1915,7 @@ static void config_activate(void)
         items_set_language();
         break;
     case CFG_SIGSTOP:   g_cfg_sigstop = !g_cfg_sigstop; break;
+    case CFG_KBMODE:    g_cfg_kb_mode = (g_cfg_kb_mode == 1) ? 2 : 1; break;
     case CFG_LEARN:
         g_learning = 1;
         g_learn_mask = 0;
@@ -1896,6 +1929,7 @@ static void config_activate(void)
         g_cfg_confirm = 1;
         g_cfg_enabled = 1;
         g_cfg_sigstop = g_cfg.no_sigstop; /* default = layer, no SIGSTOP */
+        g_cfg_kb_mode = g_cfg.keyboard_mode; /* default = compact */
         g_dim = g_cfg.dim;
         cfg_update_led_color(&g_cfg, 0xFFFFFF, 0);
         led_color_apply(0xFFFFFF);
@@ -1962,6 +1996,7 @@ static void config_compose(void)
     snprintf(labels[CFG_CONFIRMAR], sizeof labels[0], "%s", TR(S_CFG_CONFIRMAR));
     snprintf(labels[CFG_IDIOMA], sizeof labels[0], "%s", TR(S_CFG_IDIOMA));
     snprintf(labels[CFG_SIGSTOP], sizeof labels[0], "%s", TR(S_CFG_SIGSTOP));
+    snprintf(labels[CFG_KBMODE], sizeof labels[0], "%s", TR(S_CFG_KBMODE));
     snprintf(labels[CFG_LEARN], sizeof labels[0], "%s", TR(S_LEARN));
     snprintf(labels[CFG_RESET], sizeof labels[0], "%s", TR(S_RESET));
     snprintf(labels[CFG_ABOUT], sizeof labels[0], "%s", TR(S_ABOUT));
@@ -1976,27 +2011,30 @@ static void config_compose(void)
     snprintf(values[CFG_UMBRAL], sizeof values[0], "%d ms", g_holds[g_cfg_hold]);
     snprintf(values[CFG_CONFIRMAR], sizeof values[0], "%s", g_cfg_confirm ? TR(S_SI) : TR(S_NO));
     snprintf(values[CFG_IDIOMA], sizeof values[0], "%s", LANG_NAME(g_lang));
+    /* Displayed as "SIGSTOP": Sí = freeze the game, No = layer mode.
+     * Internally g_cfg_sigstop is no_sigstop (1 = no SIGSTOP). */
     snprintf(values[CFG_SIGSTOP], sizeof values[0], "%s",
-             g_cfg_sigstop ? TR(S_SI) : TR(S_NO));
+             g_cfg_sigstop ? TR(S_NO) : TR(S_SI));
+    snprintf(values[CFG_KBMODE], sizeof values[0], "%s",
+             g_cfg_kb_mode == 1 ? TR(S_KB_FULL) : TR(S_KB_COMPACT));
     values[CFG_LEARN][0] = '\0';
     values[CFG_RESET][0] = '\0';
     values[CFG_ABOUT][0] = '\0';
     snprintf(values[CFG_UPDATE], sizeof values[0], "v%s", g_manifest.version);
     values[CFG_LISTO][0] = '\0';
 
-    /* One more row than before: tighten the spacing so the last row still
-     * clears the footer at y=684. */
-    int y0 = 148, row = 0;
+    /* 15 rows now: keep them above the footer at y=684. */
+    int y0 = 142, row = 0;
     for (int i = 0; i < NCFG; i++) {
         if (!cfg_visible(i))
             continue;
-        int y = y0 + row * 36;
+        int y = y0 + row * 34;
         row++;
         int focused = (i == g_cfg_sel);
-        fill_round_a(220, y, SCR_W - 440, 32, 10,
+        fill_round_a(220, y, SCR_W - 440, 30, 10,
                      focused ? 0xE62037 : 0x1A1B22, focused ? 255 : 235);
-        draw_text(labels[i], 260, y + 2, g_f_mid, focused ? 0xFFFFFF : 0xBCBEC8, 0);
-        draw_text(values[i], SCR_W - 260, y + 2, g_f_mid, focused ? 0xFFFFFF : 0xF0F2F8, 2);
+        draw_text(labels[i], 260, y + 1, g_f_mid, focused ? 0xFFFFFF : 0xBCBEC8, 0);
+        draw_text(values[i], SCR_W - 260, y + 1, g_f_mid, focused ? 0xFFFFFF : 0xF0F2F8, 2);
     }
 
     draw_text(TR(S_CFG_FOOTER), SCR_W / 2, 684, g_f_small, 0x9698A2, 1);
@@ -2536,6 +2574,7 @@ int main(int argc, char **argv)
     logm("manifest: version %s, updater %s/%s", g_manifest.version,
          g_manifest.owner, g_manifest.repo);
     cfg_load(&g_cfg);
+    g_kb_mode = g_cfg.keyboard_mode;
     g_dim = g_cfg.dim;
     g_lang = clampi(g_cfg.lang, 0, NLANG - 1);
     lang_load(g_lang);
@@ -2611,7 +2650,10 @@ int main(int argc, char **argv)
         struct input_absinfo ai;
         if (ioctl(evfd, EVIOCGABS(ABS_X), &ai) == 0 && ai.maximum > 0)
             g_stick_max = ai.maximum;
-        logm("input device %s (stick max=%d)", dev, g_stick_max);
+        if (ioctl(evfd, EVIOCGABS(ABS_RX), &ai) == 0 && ai.maximum > 0)
+            g_rstick_max = ai.maximum;
+        logm("input device %s (left max=%d, right max=%d)", dev,
+             g_stick_max, g_rstick_max);
     }
     logm("ui ready (has_game=%d, bg=%d)", g_has_game, g_bg_ok);
 
@@ -2772,6 +2814,12 @@ int main(int argc, char **argv)
                         g_ay = e->value;
                         stick_eval();
                         g_dirty = 1;
+                    } else if (e->type == EV_ABS && e->code == ABS_RX) {
+                        g_rx = e->value;
+                        kb_move_panel();
+                    } else if (e->type == EV_ABS && e->code == ABS_RY) {
+                        g_ry = e->value;
+                        kb_move_panel();
                     }
                 }
             }

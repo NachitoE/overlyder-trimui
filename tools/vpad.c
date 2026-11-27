@@ -61,6 +61,8 @@ int main(void)
     ioctl(ufd, UI_SET_ABSBIT, ABS_HAT0Y);
     ioctl(ufd, UI_SET_ABSBIT, ABS_X);
     ioctl(ufd, UI_SET_ABSBIT, ABS_Y);
+    ioctl(ufd, UI_SET_ABSBIT, ABS_RX);
+    ioctl(ufd, UI_SET_ABSBIT, ABS_RY);
 
     struct uinput_user_dev ud;
     memset(&ud, 0, sizeof ud);
@@ -77,6 +79,10 @@ int main(void)
     ud.absmax[ABS_X] = 32767;
     ud.absmin[ABS_Y] = -32767;
     ud.absmax[ABS_Y] = 32767;
+    ud.absmin[ABS_RX] = -32767;
+    ud.absmax[ABS_RX] = 32767;
+    ud.absmin[ABS_RY] = -32767;
+    ud.absmax[ABS_RY] = 32767;
     if (write(ufd, &ud, sizeof ud) < 0)
         perror("write uinput_user_dev");
     if (ioctl(ufd, UI_DEV_CREATE) < 0) {

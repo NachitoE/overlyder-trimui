@@ -81,5 +81,8 @@
   "S_KB_HINT": "^ v / < >: Mover   A: Digitar   B: Voltar   Y: Maiús   X: 123   START: Enter   SELECT: Apagar",
   "S_KB_EMPTY": "Digite aqui...",
   "S_KB_UNAVAILABLE": "Teclado do sistema indisponível",
-  "S_CFG_SIGSTOP": "Camada sem SIGSTOP"
+  "S_CFG_SIGSTOP": "SIGSTOP",
+  "S_CFG_KBMODE": "Modo do teclado",
+  "S_KB_FULL": "Completo",
+  "S_KB_COMPACT": "Compacto"
 }

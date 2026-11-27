@@ -45,7 +45,10 @@ If you're on the device over SSH, run `sh install.sh` as root from the repo root
 
 ### Virtual keyboard
 
-Pick **Keyboard** in the panel and press <kbd>A</kbd>. The panel hides and a full-screen keyboard takes over:
+Pick **Keyboard** in the panel and press <kbd>A</kbd>. The panel hides and the keyboard takes over. There are two modes, selected in the app's settings screen (**Keyboard mode**: Compact / Full) or with `keyboard_mode=` in `overlay.cfg`:
+
+- **Compact** (default): a small floating keyboard (720×248) that can be moved anywhere on screen with the **right stick** (clamped to the screen bounds). The game stays fully visible and characters go straight into the app — there is no input box.
+- **Full**: the original full-screen keyboard with a text field and a dimmed background.
 
 | | |
 | --- | --- |
@@ -54,8 +57,9 @@ Pick **Keyboard** in the panel and press <kbd>A</kbd>. The panel hides and a ful
 | Back to the overlay | <kbd>B</kbd> or <kbd>Home</kbd> |
 | Shift / symbols | <kbd>Y</kbd> / <kbd>X</kbd> |
 | Backspace / confirm | <kbd>Select</kbd> / <kbd>Start</kbd> |
+| Move compact keyboard | right stick (left stick still moves the key cursor) |
 
-Keys are injected through a virtual keyboard device created at daemon startup, so games can enumerate it like a physical keyboard. Going back always returns to the same overlay screen with the Keyboard row focused.
+Keys are injected through a virtual keyboard device created at daemon startup, so games can enumerate it like a physical keyboard. Going back always returns to the same overlay screen with the Keyboard row focused. In compact mode the typed text is still saved to `/tmp/overlyder.keyboard.txt` as a side channel.
 
 The panel and keyboard are drawn on their own alpha-blended hardware display
 layer, so the game keeps running and nothing fights over `/dev/fb0` (no
@@ -65,10 +69,10 @@ old freeze-the-game behaviour. The last typed text is also saved to
 
 ### SIGSTOP or no SIGSTOP
 
-Both modes ship in the same binaries. You can switch with the new **Capa sin
-SIGSTOP** / **Layer, no SIGSTOP** row in the app's settings screen (values
-Sí/No), or by editing `no_sigstop` in
-`/mnt/SDCARD/System/etc/overlay.cfg`:
+Both modes ship in the same binaries. You can switch with the **SIGSTOP** row
+in the app's settings screen: **Sí** freezes the game while the panel is up,
+**No** keeps it running on a hardware layer. (Internally this is `no_sigstop`
+in `/mnt/SDCARD/System/etc/overlay.cfg`):
 
 - `no_sigstop=1` (default) — draw on a hardware display layer; the game is
   never stopped. Automatically falls back if no layer can be claimed.

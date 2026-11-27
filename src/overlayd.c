@@ -14,6 +14,7 @@ static overlay_cfg g_cfg;
 static pid_t g_stopped[MAX_STOP];
 static int g_nstopped = 0;
 static int g_has_game = 0;
+static pid_t g_hud_pid = -1;
 static void on_signal(int sig)
 {
     (void)sig;
@@ -211,7 +212,7 @@ static int is_system_daemon(pid_t pid)
 {
     static const char *skip[] = {
         "keymon", "trimui_inputd", "trimui_scened", "MainUI",
-        "runtrimui.sh", "btmanager", "overlayd", "overlay_ui",
+        "runtrimui.sh", "btmanager", "overlayd", "overlay_ui", "fpshud",
         "sh", "ash", "bash", "udpbcast", "ntpd", "dropbear", NULL
     };
     char path[64], buf[256];
@@ -374,8 +375,75 @@ static void ui_path(char *out, size_t outsz)
     snprintf(out, outsz, "/mnt/SDCARD/Apps/OverLyder/bin/overlay_ui");
 }
 
+/* The HUD is a separate resident process: the settings UI only lives while
+ * the hotkey is held. It dies with the daemon (PDEATHSIG) so a daemon restart
+ * after a config change always picks up the new HUD settings. */
+static void hud_path(char *out, size_t outsz)
+{
+    char exe[512];
+    ssize_t n = readlink("/proc/self/exe", exe, sizeof exe - 1);
+    if (n > 0) {
+        exe[n] = '\0';
+        char *slash = strrchr(exe, '/');
+        if (slash) {
+            *slash = '\0';
+            snprintf(out, outsz, "%s/fpshud", exe);
+            if (access(out, X_OK) == 0)
+                return;
+        }
+    }
+    snprintf(out, outsz, "/mnt/SDCARD/Apps/OverLyder/bin/fpshud");
+}
+
+static void hud_start(void)
+{
+    if (g_hud_pid > 0)
+        return;
+    char path[512];
+    hud_path(path, sizeof path);
+    if (access(path, X_OK) != 0) {
+        logm("fpshud not installed at %s", path);
+        return;
+    }
+    pid_t pid = fork();
+    if (pid == 0) {
+        prctl(PR_SET_PDEATHSIG, SIGTERM);
+        execl(path, "fpshud", (char *)NULL);
+        logm("fpshud exec failed: %s", strerror(errno));
+        _exit(EXIT_FAILED);
+    }
+    if (pid > 0) {
+        g_hud_pid = pid;
+        logm("fpshud started (pid %d)", (int)pid);
+    }
+}
+
+static void hud_stop(void)
+{
+    if (g_hud_pid <= 0)
+        return;
+    kill(g_hud_pid, SIGTERM);
+    int st = 0;
+    for (int i = 0; i < 20; i++) {
+        pid_t r = waitpid(g_hud_pid, &st, WNOHANG);
+        if (r == g_hud_pid || r < 0)
+            break;
+        usleep(50000);
+    }
+    g_hud_pid = -1;
+}
+
 static void run_overlay(int fd, int open_keyboard)
 {
+    /* Published for fpshud: it hides its layer whenever the panel is up,
+     * including the SIGSTOP mode where no LAYER_FLAG is created. */
+    {
+        FILE *f = fopen(OVERLAY_OPEN_FLAG, "w");
+        if (f) {
+            fprintf(f, "%d\n", (int)getpid());
+            fclose(f);
+        }
+    }
     int use_layer = g_cfg.no_sigstop && getenv("OVERLAY_NO_LAYER") == NULL;
 
     /* If we cannot claim a hardware layer, fall back to freezing the game:
@@ -417,6 +485,7 @@ static void run_overlay(int fd, int open_keyboard)
     if (pid < 0) {
         logm("fork failed");
         resume_targets();
+        unlink(OVERLAY_OPEN_FLAG);
         return;
     }
 
@@ -441,6 +510,7 @@ static void run_overlay(int fd, int open_keyboard)
     } else {
         resume_targets();
     }
+    unlink(OVERLAY_OPEN_FLAG);
 }
 
 /* Update both hotkey combos from one key press/release. `code` can be a
@@ -514,6 +584,8 @@ int main(int argc, char **argv)
         }
     }
 
+    unlink(OVERLAY_OPEN_FLAG); /* stale flag from a killed daemon */
+
     /* single instance */
     int pidfd = open(PID_FILE, O_RDWR | O_CREAT | O_CLOEXEC, 0644);
     if (pidfd >= 0 && flock(pidfd, LOCK_EX | LOCK_NB) < 0) {
@@ -568,6 +640,9 @@ int main(int argc, char **argv)
         logm("restored LED color #%06X", g_cfg.led_color);
     }
 
+    if (g_cfg.fps_hud)
+        hud_start();
+
     int fd = open(dev, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
     if (fd < 0) {
         logm("cannot open %s: %s", dev, strerror(errno));
@@ -588,6 +663,19 @@ int main(int argc, char **argv)
     int in_overlay = 0;
 
     while (g_run) {
+        /* Settings changed from the in-game overlay: refresh the HUD without
+         * restarting this daemon (the panel is our child and would die). */
+        if (access(HUD_SYNC_FILE, F_OK) == 0) {
+            unlink(HUD_SYNC_FILE);
+            cfg_load(&g_cfg);
+            if (!g_cfg.fps_hud)
+                hud_stop();
+            else if (g_hud_pid <= 0 || kill(g_hud_pid, 0) != 0) {
+                hud_stop();
+                hud_start();
+            }
+        }
+
         struct input_event ev[32];
         ssize_t rd = read(fd, ev, sizeof ev);
         if (rd < 0 && errno != EAGAIN && errno != EINTR)
@@ -661,6 +749,7 @@ int main(int argc, char **argv)
     close(fd);
 
 out:
+    hud_stop();
     if (pidfd >= 0) {
         unlink(PID_FILE);
         close(pidfd);

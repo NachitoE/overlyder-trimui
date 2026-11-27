@@ -53,8 +53,9 @@ typedef struct {
 
 /* Channel 1 is the UI/fb0 layer (z=16); channel 0 is video. Stock trimui_osdd
  * uses channels 2 and 3 when it runs, so prefer the higher ones. */
-static const unsigned int g_channels[] = { 3, 2 };
-#define NCHANNELS ((int)(sizeof g_channels / sizeof g_channels[0]))
+static const unsigned int g_channels_high[] = { 3, 2 };
+static const unsigned int g_channels_low[]  = { 2, 3 };
+#define NCHANNELS 2
 
 static int disp_get_config(int fd, unsigned channel, unsigned layer_id,
                            disp_layer_config *cfg)
@@ -80,8 +81,9 @@ static int disp_set_config(int fd, disp_layer_config *cfg)
     return ioctl(fd, DISP_LAYER_SET_CONFIG, args);
 }
 
-static int claim_channel(int *channel_out)
+static int claim_channel(int *channel_out, int prefer_high)
 {
+    const unsigned int *channels = prefer_high ? g_channels_high : g_channels_low;
     int fd = open(DISP_DEV, O_RDWR | O_CLOEXEC);
     if (fd < 0) {
         logm("cannot open %s: %s", DISP_DEV, strerror(errno));
@@ -91,10 +93,10 @@ static int claim_channel(int *channel_out)
         disp_layer_config cfg;
         /* Channels 4..7 on this firmware return 0 from both GET and SET but
          * silently ignore writes. Only 2 and 3 are real hardware layers. */
-        if (disp_get_config(fd, g_channels[i], 0, &cfg) != 0 || cfg.enable)
+        if (disp_get_config(fd, channels[i], 0, &cfg) != 0 || cfg.enable)
             continue;
         close(fd);
-        *channel_out = (int)g_channels[i];
+        *channel_out = (int)channels[i];
         return 0;
     }
     close(fd);
@@ -103,15 +105,15 @@ static int claim_channel(int *channel_out)
 
 /* A UI killed with SIGKILL cannot hide its layer. The flag file records the
  * PID and channel so the next instance can clean up after it. */
-static void clear_stale_layer(void)
+static void clear_stale_flag(const char *path)
 {
-    FILE *f = fopen(LAYER_FLAG, "r");
+    FILE *f = fopen(path, "r");
     if (!f)
         return;
     int pid = -1, ch = -1;
     if (fscanf(f, "%d %d", &pid, &ch) != 2 || pid <= 0 || ch < 0) {
         fclose(f);
-        unlink(LAYER_FLAG);
+        unlink(path);
         return;
     }
     fclose(f);
@@ -127,14 +129,20 @@ static void clear_stale_layer(void)
         }
         close(fd);
     }
-    unlink(LAYER_FLAG);
+    unlink(path);
+}
+
+static void clear_stale_layer(void)
+{
+    clear_stale_flag(LAYER_FLAG);
+    clear_stale_flag(HUD_LAYER_FLAG);
 }
 
 int overlay_layer_probe(void)
 {
     int ch;
     clear_stale_layer();
-    return claim_channel(&ch);
+    return claim_channel(&ch, 1);
 }
 
 static void fill_config(overlay_layer *l, disp_layer_config *cfg)
@@ -176,12 +184,13 @@ static int set_enable(overlay_layer *l, int enable)
     return 0;
 }
 
-int overlay_layer_open(overlay_layer *l, int width, int height)
+int overlay_layer_open_ex(overlay_layer *l, int width, int height,
+                          int prefer_high, int pages_from_end)
 {
     memset(l, 0, sizeof *l);
     clear_stale_layer();
     int ch = -1;
-    if (claim_channel(&ch) != 0) {
+    if (claim_channel(&ch, prefer_high) != 0) {
         logm("no free disp hardware channel");
         return -1;
     }
@@ -218,7 +227,13 @@ int overlay_layer_open(overlay_layer *l, int width, int height)
     int cur = (int)(var.yoffset / var.yres);
     /* Stay well away from the page currently on screen. The emulators use
      * only a handful of the ~18 available pages. */
-    int page = pages > 6 ? pages - 3 : (cur + pages / 2) % pages;
+    if (pages_from_end < 1)
+        pages_from_end = 1;
+    int page = pages > 6 ? pages - pages_from_end : (cur + pages / 2) % pages;
+    if (page < 0)
+        page = 0;
+    if (page >= pages)
+        page = pages - 1;
     if (page == cur)
         page = (cur + 1) % pages;
     /* Match the live UI layer's geometry exactly. On this firmware it is
@@ -288,6 +303,13 @@ int overlay_layer_open(overlay_layer *l, int width, int height)
 fail:
     overlay_layer_close(l);
     return -1;
+}
+
+int overlay_layer_open(overlay_layer *l, int width, int height)
+{
+    /* The in-game panel prefers channel 3 and page 15; a resident HUD (if
+     * enabled) prefers channel 2 and page 14 so the two never collide. */
+    return overlay_layer_open_ex(l, width, height, 1, 3);
 }
 
 int overlay_layer_show(overlay_layer *l) { return set_enable(l, 1); }

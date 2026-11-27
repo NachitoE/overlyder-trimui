@@ -26,6 +26,7 @@ Hold the Home button (or a combo you choose) and a Switch-style overlay slides o
 - Virtual keyboard: opens from the overlay, sends real key presses to the app underneath and returns to the panel with B/Home
 - No patches or setup inside the game
 - Trigger, hold time, language (Spanish, English, Portuguese, from JSON files) and the SIGSTOP/layer mode set from the app
+- Optional persistent, read-only FPS counter: FPS, frametime, CPU/GPU usage, temperatures and frequencies in any corner, configured from the app
 - Built-in updater in the app: shows the installed version and checks GitHub releases for a newer one
 
 ## Install
@@ -42,6 +43,16 @@ If you're on the device over SSH, run `sh install.sh` as root from the repo root
 | Move around | D-pad or stick |
 | Change a value | left/right |
 | Close it | <kbd>B</kbd> or <kbd>Home</kbd> |
+
+### FPS counter
+
+Hold the hotkey to open the panel, choose **Contador FPS / FPS counter** and
+press <kbd>A</kbd>. The submenu (inside the overlay) turns it on, picks the
+corner, toggles **Simple** (just the texts side by side, no window — default)
+or **Window**, and selects which read-only rows to show (FPS, frametime,
+CPU/GPU usage, temperature, frequencies, battery). The HUD stays on screen
+while you play, drawn on a second hardware display layer; it never changes
+game settings. See [`docs/FPS_HUD.md`](docs/FPS_HUD.md).
 
 ### Virtual keyboard
 

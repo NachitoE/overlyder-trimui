@@ -24,11 +24,11 @@
 enum { IT_SLIDER = 0, IT_ACTION = 1, IT_TOGGLE = 2 };
 enum {
     ACT_NONE = 0, ACT_CLOSE, ACT_EXIT_GAME, ACT_REBOOT, ACT_POWEROFF,
-    ACT_KEYBOARD
+    ACT_KEYBOARD, ACT_FPSHUD
 };
 enum {
     I_VOL = 0, I_BRI, I_CON, I_EXP, I_SAT, I_TMP,
-    I_LEDBRI, I_LEDCOLOR, I_MUTE, I_KEYBOARD,
+    I_LEDBRI, I_LEDCOLOR, I_MUTE, I_KEYBOARD, I_FPSHUD,
     I_PLAY, I_EXIT, I_REBOOT, I_POWER
 };
 
@@ -49,6 +49,7 @@ enum {
 #define GL_COLOR   0xE0C3u  /* invert_colors */
 #define GL_MUTE    0xE04Fu  /* volume_off */
 #define GL_KEYBOARD 0xE5DAu /* keyboard */
+#define GL_FPS      0xE24Bu /* show_chart */
 #define GL_BATTERY 0xE1A4u  /* battery_full */
 #define GL_WIFI    0xE63Eu  /* wifi (Material Icons v1.017 codepoint) */
 #define GL_BT      0xE1A7u  /* bluetooth */
@@ -73,6 +74,7 @@ static item_t items[] = {
     { "LED color",   IT_SLIDER, ACT_NONE,      5,  0, GL_COLOR },
     { "Silenciar",   IT_TOGGLE, ACT_NONE,      0,  0, GL_MUTE },
     { "Teclado",     IT_ACTION, ACT_KEYBOARD,  0,  0, GL_KEYBOARD },
+    { "Contador FPS", IT_ACTION, ACT_FPSHUD,   0,  0, GL_FPS },
     { "Continuar",   IT_ACTION, ACT_CLOSE,     0,  0, GL_PLAY },
     { "Salir juego", IT_ACTION, ACT_EXIT_GAME, 0,  0, GL_EXIT },
     { "Reiniciar",   IT_ACTION, ACT_REBOOT,    0,  0, GL_REBOOT },
@@ -159,6 +161,14 @@ enum {
     CFG_KBHOTKEY, CFG_LEARN, CFG_RESET, CFG_ABOUT, CFG_UPDATE, CFG_LISTO, NCFG
 };
 
+/* FPS counter submenu, opened from the in-game overlay (not the app).
+ * Read-only telemetry configuration: no clocks or game tweaks live here. */
+enum {
+    HUD_R_ENABLED = 0, HUD_R_POS, HUD_R_STYLE, HUD_R_FIELDS,
+    HUD_R_BACK = HUD_R_FIELDS + HUD_F_COUNT
+};
+#define NHUDROWS (HUD_R_BACK + 1)
+
 #define PRESET_CUSTOM 6
 
 static const struct {
@@ -227,6 +237,9 @@ static int g_upd_prev_state = UPD_UPTODATE; /* state behind the options submenu 
 static int g_upd_same = 0;                  /* remote tag == installed version */
 static int g_upd_opt_sel = 0;               /* 0 = reinstall switch, 1 = back */
 static char g_upd_latest[32] = "";
+
+static int g_hud_sub = 0;
+static int g_hud_sel = HUD_R_ENABLED;
 
 static void update_compose(void);
 static void upd_check(void);
@@ -306,7 +319,7 @@ static void items_set_language(void)
 {
     static const int ids[NITEMS] = {
         S_VOL, S_BRI, S_CON, S_EXP, S_SAT, S_TMP,
-        S_LED_BRI, S_LED_COLOR, S_MUTE, S_KEYBOARD,
+        S_LED_BRI, S_LED_COLOR, S_MUTE, S_KEYBOARD, S_CFG_FPSHUD,
         S_PLAY, S_EXIT, S_REBOOT, S_POWER
     };
     for (int i = 0; i < NITEMS; i++)
@@ -1100,7 +1113,7 @@ static void item_apply(int idx)
 #define PANEL_X      (SCR_W - PANEL_W - 32)
 #define PANEL_TOP    28
 #define PANEL_H      664
-#define ROW_H        32
+#define ROW_H        30
 #define ROW_TOP      (PANEL_TOP + 88)
 
 static void item_value_text(int idx, char *buf, size_t n)
@@ -1920,6 +1933,10 @@ static void config_save(void)
         fprintf(f, "confirm_exit=%d\n", g_cfg_confirm ? 1 : 0);
         fprintf(f, "no_sigstop=%d\n", g_cfg_sigstop ? 1 : 0);
         fprintf(f, "keyboard_mode=%d\n", g_cfg_kb_mode);
+        fprintf(f, "fps_hud=%d\n", g_cfg.fps_hud ? 1 : 0);
+        fprintf(f, "fps_hud_pos=%d\n", g_cfg.fps_hud_pos);
+        fprintf(f, "fps_hud_style=%d\n", g_cfg.fps_hud_style);
+        fprintf(f, "fps_hud_fields=%u\n", g_cfg.fps_hud_fields);
         fprintf(f, "kbd_trigger=");
         {
             int n = 0;
@@ -1947,7 +1964,19 @@ static void config_save(void)
         run_cmd("cp -f /mnt/SDCARD/Apps/OverLyder/overLyder.start "
                 "/mnt/SDCARD/System/starts/overLyder.sh >/dev/null 2>&1");
         run_cmd("chmod 755 /mnt/SDCARD/System/starts/overLyder.sh >/dev/null 2>&1");
-        run_cmd("/mnt/SDCARD/Apps/OverLyder/overlayctl start >/dev/null 2>&1");
+        FILE *sf = fopen(HUD_SYNC_FILE, "w");
+        if (sf) {
+            fclose(sf);
+            sync();
+        }
+        if (g_mode_cfg) {
+            /* The config app is independent of the daemon: a restart there
+             * applies every setting and respawns the HUD. */
+            run_cmd("/mnt/SDCARD/Apps/OverLyder/overlayctl restart >/dev/null 2>&1");
+        }
+        /* From the in-game panel we must NOT restart the daemon: the panel is
+         * its child and PDEATHSIG would close it. overlayd sees the sync flag
+         * and re-reads the config / respawns the HUD instead. */
     } else {
         FILE *flag = fopen(DISABLE_FLAG, "w");
         if (flag) {
@@ -1991,6 +2020,103 @@ static void learn_finish_kb(void)
     config_save();
 }
 
+static const char *hud_field_label(int i)
+{
+    static const int keys[] = {
+        S_HUD_FPS, S_HUD_FRAME, S_HUD_CPU, S_HUD_GPU,
+        S_HUD_TEMP, S_HUD_CPUFREQ, S_HUD_GPUFREQ, S_HUD_BATT
+    };
+    if (i < 0 || i >= HUD_F_COUNT)
+        return "";
+    return TR(keys[i]);
+}
+
+static const char *hud_pos_label(void)
+{
+    switch (g_cfg.fps_hud_pos) {
+    case 1: return TR(S_HUD_POS_TR);
+    case 2: return TR(S_HUD_POS_BL);
+    case 3: return TR(S_HUD_POS_BR);
+    default: return TR(S_HUD_POS_TL);
+    }
+}
+
+static void hud_sub_open(void)
+{
+    g_hud_sub = 1;
+    g_hud_sel = HUD_R_ENABLED;
+    g_dirty = 1;
+}
+
+static void hud_sub_activate(void)
+{
+    if (g_hud_sel == HUD_R_BACK) {
+        g_hud_sub = 0;
+        g_dirty = 1;
+        return;
+    }
+    if (g_hud_sel == HUD_R_ENABLED) {
+        g_cfg.fps_hud = !g_cfg.fps_hud;
+    } else if (g_hud_sel == HUD_R_POS) {
+        g_cfg.fps_hud_pos = (g_cfg.fps_hud_pos + 1) % 4;
+    } else if (g_hud_sel == HUD_R_STYLE) {
+        g_cfg.fps_hud_style = g_cfg.fps_hud_style == HUD_STYLE_SIMPLE
+                                  ? HUD_STYLE_WINDOW : HUD_STYLE_SIMPLE;
+    } else {
+        unsigned bit = 1u << (g_hud_sel - HUD_R_FIELDS);
+        g_cfg.fps_hud_fields ^= bit;
+    }
+    /* Same auto-save pattern as every other settings row. config_save()
+     * restarts the daemon, which re-spawns the HUD with the new settings. */
+    config_save();
+    g_dirty = 1;
+}
+
+static void hud_sub_compose(void)
+{
+    /* Also called from the in-game overlay, so it must prepare the canvas. */
+    if (g_bg_ok)
+        memcpy(g_cv, g_bg_dim, sizeof g_cv);
+    else {
+        memset(g_cv, 0, sizeof g_cv);
+        fill_rect_a(0, 0, SCR_W, SCR_H, 0x000000, g_dim * 255 / 100);
+    }
+    draw_text(TR(S_HUD_TITLE), SCR_W / 2, 150, g_f_big, 0xF0F2F8, 1);
+
+    char labels[NHUDROWS][64], values[NHUDROWS][64];
+    for (int i = 0; i < NHUDROWS; i++) {
+        labels[i][0] = values[i][0] = '\0';
+    }
+    snprintf(labels[HUD_R_ENABLED], sizeof labels[0], "%s", TR(S_HUD_ENABLED));
+    snprintf(values[HUD_R_ENABLED], sizeof values[0], "%s",
+             g_cfg.fps_hud ? TR(S_SI) : TR(S_NO));
+    snprintf(labels[HUD_R_POS], sizeof labels[0], "%s", TR(S_HUD_POS));
+    snprintf(values[HUD_R_POS], sizeof values[0], "%s", hud_pos_label());
+    snprintf(labels[HUD_R_STYLE], sizeof labels[0], "%s", TR(S_HUD_STYLE));
+    snprintf(values[HUD_R_STYLE], sizeof values[0], "%s",
+             g_cfg.fps_hud_style == HUD_STYLE_SIMPLE ? TR(S_HUD_SIMPLE)
+                                                    : TR(S_HUD_WINDOW));
+    for (int i = 0; i < HUD_F_COUNT; i++) {
+        unsigned bit = 1u << i;
+        snprintf(labels[HUD_R_FIELDS + i], sizeof labels[0], "%s", hud_field_label(i));
+        snprintf(values[HUD_R_FIELDS + i], sizeof values[0], "%s",
+                 (g_cfg.fps_hud_fields & bit) ? TR(S_SI) : TR(S_NO));
+    }
+    snprintf(labels[HUD_R_BACK], sizeof labels[0], "%s", TR(S_HUD_BACK));
+
+    for (int i = 0; i < NHUDROWS; i++) {
+        int y = 196 + i * 36;
+        int focused = (i == g_hud_sel);
+        fill_round_a(300, y, SCR_W - 600, 34, 10,
+                     focused ? 0xE62037 : 0x1A1B22, focused ? 255 : 235);
+        draw_text(labels[i], 340, y + 3, g_f_mid, focused ? 0xFFFFFF : 0xBCBEC8, 0);
+        if (values[i][0])
+            draw_text(values[i], SCR_W - 340, y + 3, g_f_mid,
+                      focused ? 0xFFFFFF : 0xF0F2F8, 2);
+    }
+    draw_text(TR(S_HUD_HINT), SCR_W / 2, 684, g_f_small, 0x9698A2, 1);
+}
+
 static void config_activate(void)
 {
     switch (g_cfg_sel) {
@@ -2032,6 +2158,7 @@ static void config_activate(void)
         g_cfg_enabled = 1;
         g_cfg_sigstop = g_cfg.no_sigstop; /* default = layer, no SIGSTOP */
         g_cfg_kb_mode = g_cfg.keyboard_mode; /* default = compact */
+        g_hud_sub = 0; /* cfg_defaults() above also resets the HUD fields */
         for (int i = 0; i < 4; i++)
             g_kb_custom[i] = key_index_from_code(g_cfg.kbd_trigger[i]);
         g_kb_custom_count = g_cfg.kbd_trigger_count;
@@ -2072,6 +2199,11 @@ static void config_compose(void)
         draw_text(g_manifest.credits, SCR_W / 2, 330, g_f_mid, 0xF0F2F8, 1);
         draw_text(TR(S_ABOUT_TEXT), SCR_W / 2, 400, g_f_small, 0xC0C2CC, 1);
         draw_text(TR(S_ABOUT_HINT), SCR_W / 2, 600, g_f_small, 0x9698A2, 1);
+        return;
+    }
+
+    if (g_hud_sub) {
+        hud_sub_compose();
         return;
     }
 
@@ -2155,7 +2287,7 @@ static void config_compose(void)
     snprintf(values[CFG_UPDATE], sizeof values[0], "v%s", g_manifest.version);
     values[CFG_LISTO][0] = '\0';
 
-    /* 16 rows now: keep them above the footer at y=684. */
+    /* 16 rows max: keep them above the footer at y=684. */
     int y0 = 140, row = 0;
     for (int i = 0; i < NCFG; i++) {
         if (!cfg_visible(i))
@@ -2526,6 +2658,8 @@ static void horiz_move(int dir)
 {
     if (g_mode_cfg && (g_learning || g_about))
         return;
+    if (g_hud_sub)
+        return; /* the FPS submenu uses A/B, not left/right */
     if (g_mode_cfg && g_upd_state == UPD_OPTIONS) {
         if (g_upd_opt_sel == 0 && dir)
             upd_option_toggle();
@@ -2553,6 +2687,11 @@ static void vert_move(int dir)
 {
     if (g_mode_cfg && (g_learning || g_about))
         return;
+    if (g_hud_sub) {
+        g_hud_sel = (g_hud_sel + (dir > 0 ? 1 : -1) + NHUDROWS) % NHUDROWS;
+        g_dirty = 1;
+        return;
+    }
     if (g_mode_cfg && g_upd_state == UPD_OPTIONS) {
         g_upd_opt_sel = (g_upd_opt_sel + (dir > 0 ? 1 : -1) + 2) % 2;
         return;
@@ -2606,6 +2745,10 @@ static void activate(void)
         }
         return;
     }
+    if (g_hud_sub) {
+        hud_sub_activate();
+        return;
+    }
     if (SEL_IS_RADIO(g_sel)) {
         radio_toggle(g_radio);
         return;
@@ -2628,6 +2771,10 @@ static void activate(void)
         kb_open();
         return;
     }
+    if (it->action == ACT_FPSHUD) {
+        hud_sub_open();
+        return;
+    }
     if (it->action == ACT_EXIT_GAME && !g_has_game)
         return;
     if (g_cfg.confirm_exit)
@@ -2642,6 +2789,11 @@ static void activate(void)
 
 static void go_back(void)
 {
+    if (g_hud_sub) {
+        g_hud_sub = 0;
+        g_dirty = 1;
+        return;
+    }
     if (g_kb_open) {
         kb_close();
         return;
@@ -2883,6 +3035,14 @@ int main(int argc, char **argv)
                             if (e->code == K_A || e->code == K_B || e->code == K_MODE ||
                                 e->code == K_START || e->code == K_SELECT)
                                 g_about = 0;
+                        } else if (g_mode_cfg && g_hud_sub) {
+                            if (e->code == K_A) {
+                                hud_sub_activate();
+                            } else if (e->code == K_B || e->code == K_MODE ||
+                                       e->code == K_START || e->code == K_SELECT) {
+                                g_hud_sub = 0;
+                                g_dirty = 1;
+                            }
                         } else if (g_mode_cfg && g_kb_learning) {
                             if (e->code == K_B) {
                                 learn_finish_kb();
@@ -2924,10 +3084,14 @@ int main(int argc, char **argv)
                             case K_MODE:
                             case K_START:
                             case K_SELECT:
-                                if (g_confirm)
+                                if (g_hud_sub) {
+                                    g_hud_sub = 0;
+                                    g_dirty = 1;
+                                } else if (g_confirm) {
                                     g_confirm = ACT_NONE;
-                                else
+                                } else {
                                     do_close(EXIT_CLOSE);
+                                }
                                 break;
                             default:
                                 break;
@@ -3050,7 +3214,9 @@ int main(int argc, char **argv)
             g_quit = 1;
 
         if (g_dirty) {
-            if (g_mode_cfg)
+            if (g_hud_sub)
+                hud_sub_compose();
+            else if (g_mode_cfg)
                 config_compose();
             else
                 compose();

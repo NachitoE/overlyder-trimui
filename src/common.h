@@ -37,6 +37,26 @@
 #define DISP_ATTR       "/sys/class/disp/disp/attr/"
 #define LED_SYS         "/sys/class/led_anim/"
 #define LAYER_FLAG      "/tmp/overlay_layer_active"
+#define HUD_LAYER_FLAG  "/tmp/overlyder_hud_layer"
+#define HUD_SYNC_FILE   "/tmp/overlyder_hud_sync"
+#define OVERLAY_OPEN_FLAG "/tmp/overlyder_overlay_open"
+#define HUD_PID_FILE    "/tmp/overlyder_hud.pid"
+#define HUD_STATUS_FILE "/tmp/overlyder_hud.status"
+
+/* Persistent read-only performance HUD. The field mask is a bit set so each
+ * row can be toggled independently in the settings submenu. */
+#define HUD_F_FPS       (1u << 0)
+#define HUD_F_FRAME     (1u << 1)
+#define HUD_F_CPU       (1u << 2)
+#define HUD_F_GPU       (1u << 3)
+#define HUD_F_TEMP      (1u << 4)
+#define HUD_F_CPUFREQ   (1u << 5)
+#define HUD_F_GPUFREQ   (1u << 6)
+#define HUD_F_BATT      (1u << 7)
+#define HUD_F_COUNT     8
+#define HUD_FIELDS_ALL  ((1u << HUD_F_COUNT) - 1u)
+#define HUD_STYLE_SIMPLE  0  /* one line of text, no box */
+#define HUD_STYLE_WINDOW  1  /* rounded translucent box */
 
 /* Runtime metadata (version + updater source) lives in manifest.json so it
  * can be changed without rebuilding the binaries. */
@@ -90,6 +110,10 @@ typedef struct {
     int keyboard_mode;    /* 1 = full keyboard with input box, 2 = compact */
     int kbd_trigger[4];   /* key codes that open the keyboard directly */
     int kbd_trigger_count;/* 0 = shortcut disabled */
+    int fps_hud;          /* 1 = persistent read-only FPS HUD */
+    int fps_hud_pos;      /* 0=top-left 1=top-right 2=bottom-left 3=bottom-right */
+    int fps_hud_style;    /* HUD_STYLE_SIMPLE / HUD_STYLE_WINDOW */
+    unsigned fps_hud_fields; /* bit mask of HUD_F_* rows */
 } overlay_cfg;
 
 void cfg_defaults(overlay_cfg *c);

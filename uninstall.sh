@@ -28,7 +28,7 @@ fi
 rm -rf "$APP" "$LEGACY_APP"
 rm -f "$HOOK" "$LEGACY_HOOK"
 rm -f "$ETC/overlay.cfg" "$ETC/overlay.disabled"
-rm -f /tmp/overlayd.pid /tmp/overlay_stopped.pids
+rm -f /tmp/overlayd.pid /tmp/overlay_stopped.pids /tmp/overlyder_hud.pid /tmp/overlyder_hud.status /tmp/overlyder_hud_layer /tmp/overlyder_hud_sync /tmp/overlyder_overlay_open
 
 sync
 echo "OverLyder uninstalled."

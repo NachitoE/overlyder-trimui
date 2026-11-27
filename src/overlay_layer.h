@@ -36,8 +36,13 @@ typedef struct {
 /* Cheap check used by overlayd before deciding whether to SIGSTOP the game. */
 int overlay_layer_probe(void);
 
-/* Claim a free channel and a spare fb page. 0 = success. */
+/* Claim a free channel and a spare fb page. 0 = success.
+ * _ex lets a second consumer (the persistent HUD) prefer the other channel
+ * and a different spare page. prefer_high=1 tries 3 then 2, 0 tries 2 then 3;
+ * pages_from_end selects page (total_pages - N). */
 int overlay_layer_open(overlay_layer *l, int width, int height);
+int overlay_layer_open_ex(overlay_layer *l, int width, int height,
+                          int prefer_high, int pages_from_end);
 
 int overlay_layer_show(overlay_layer *l);
 int overlay_layer_hide(overlay_layer *l);

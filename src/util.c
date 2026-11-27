@@ -227,6 +227,11 @@ void cfg_defaults(overlay_cfg *c)
     c->kbd_trigger[0] = K_SELECT;
     c->kbd_trigger[1] = K_L1;
     c->kbd_trigger_count = 2; /* SELECT + L1 opens the keyboard */
+    c->fps_hud = 0;           /* off until enabled in the settings screen */
+    c->fps_hud_pos = 0;       /* top-left */
+    c->fps_hud_style = HUD_STYLE_SIMPLE; /* no box over the game */
+    c->fps_hud_fields = HUD_F_FPS | HUD_F_FRAME | HUD_F_CPU |
+                        HUD_F_GPU | HUD_F_TEMP;
 }
 
 static void trim(char *s)
@@ -310,6 +315,18 @@ int cfg_load(overlay_cfg *c)
         } else if (!strcasecmp(k, "keyboard_mode")) {
             int m = atoi(v);
             c->keyboard_mode = (m == 1 || m == 2) ? m : 2;
+        } else if (!strcasecmp(k, "fps_hud")) {
+            c->fps_hud = atoi(v) ? 1 : 0;
+        } else if (!strcasecmp(k, "fps_hud_pos")) {
+            int p = atoi(v);
+            c->fps_hud_pos = (p >= 0 && p <= 3) ? p : 0;
+        } else if (!strcasecmp(k, "fps_hud_style")) {
+            c->fps_hud_style = atoi(v) == HUD_STYLE_WINDOW ? HUD_STYLE_WINDOW
+                                                          : HUD_STYLE_SIMPLE;
+        } else if (!strcasecmp(k, "fps_hud_fields")) {
+            unsigned long bits = strtoul(v, NULL, 0);
+            /* Unknown bits are dropped so a future field cannot leak in. */
+            c->fps_hud_fields = (unsigned)bits & HUD_FIELDS_ALL;
         } else if (!strcasecmp(k, "ledcolor")) {
             const char *hex = v;
             if (*hex == '#')

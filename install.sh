@@ -16,7 +16,7 @@ DISABLE=$ETC/overlay.disabled
 HOOK=$STARTS/overLyder.sh
 STAMP=$(date +%Y%m%d-%H%M%S)
 
-for f in "$SRC/dist/bin/overlayd" "$SRC/dist/bin/overlay_ui" \
+for f in "$SRC/dist/bin/overlayd" "$SRC/dist/bin/overlay_ui" "$SRC/dist/bin/fpshud" \
          "$SRC/app/config.json" "$SRC/app/manifest.json" "$SRC/app/icon.png" "$SRC/app/launch.sh" \
          "$SRC/app/overlayctl" "$SRC/app/overLyder.start" "$SRC/app/updater.sh" \
          "$SRC/app/resources/MaterialIcons-Regular.ttf" \
@@ -49,10 +49,11 @@ cp -f "$SRC/app/updater.sh" "$APP/updater.sh"
 cp -f "$SRC/app/defaults/overlay.cfg" "$APP/defaults/overlay.cfg"
 cp -f "$SRC/dist/bin/overlayd" "$APP/bin/overlayd"
 cp -f "$SRC/dist/bin/overlay_ui" "$APP/bin/overlay_ui"
+cp -f "$SRC/dist/bin/fpshud" "$APP/bin/fpshud"
 cp -f "$SRC/app/resources/MaterialIcons-Regular.ttf" "$APP/resources/"
 cp -f "$SRC/app/resources/LICENSE-MaterialIcons.txt" "$APP/resources/"
 cp -f "$SRC/app/lang/"*.json "$APP/lang/"
-chmod 755 "$APP/launch.sh" "$APP/overlayctl" "$APP/updater.sh" "$APP/bin/overlayd" "$APP/bin/overlay_ui"
+chmod 755 "$APP/launch.sh" "$APP/overlayctl" "$APP/updater.sh" "$APP/bin/overlayd" "$APP/bin/overlay_ui" "$APP/bin/fpshud"
 
 if [ ! -f "$CFG" ]; then
     cp -f "$APP/defaults/overlay.cfg" "$CFG"

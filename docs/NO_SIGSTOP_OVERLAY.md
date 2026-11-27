@@ -66,6 +66,12 @@ Measured layer map on this unit:
 write by reading the config back after enabling it. If neither is free (e.g.
 `trimui_osdd` is running), OverLyder falls back to the SIGSTOP path.
 
+The persistent FPS HUD (`fpshud`, see [`FPS_HUD.md`](FPS_HUD.md)) uses the
+*other* channel: it prefers 2 and page 14, while the panel keeps 3 / page 15.
+`overlay_layer_open_ex()` implements that preference. While the panel is up it
+publishes `LAYER_FLAG`, and the HUD hides its layer until the panel closes, so
+only one extra layer is enabled at a time.
+
 The overlay is drawn into its own layer at **zorder 20** (above the UI layer)
 with `alpha_mode = 2` (global × pixel alpha) and `alpha_value = 255`. The
 canvas itself carries per-pixel alpha: a translucent black dim over the game

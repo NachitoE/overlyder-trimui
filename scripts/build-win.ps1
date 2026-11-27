@@ -50,6 +50,11 @@ Write-Host "=== overlay_ui"
     -L $SdlLib -lSDL2 -lSDL2_ttf -lm -o "$Out/bin/overlay_ui"
 if ($LASTEXITCODE -ne 0) { throw "overlay_ui build failed" }
 
+Write-Host "=== fpshud"
+& $Zig @common src/util.c src/overlay_layer.c src/fpshud.c `
+    -L $SdlLib -lSDL2 -lSDL2_ttf -lm -o "$Out/bin/fpshud"
+if ($LASTEXITCODE -ne 0) { throw "fpshud build failed" }
+
 Write-Host "=== vpad (test tool)"
 & $Zig @common tools/vpad.c -o "$Out/bin/vpad"
 if ($LASTEXITCODE -ne 0) { throw "vpad build failed" }
@@ -61,7 +66,7 @@ Copy-Item "app\config.json", "app\manifest.json", "app\icon.png", "app\launch.sh
           "app\overLyder.start", "app\updater.sh" -Destination $pkg -Force
 Copy-Item "app\defaults\overlay.cfg" -Destination "$pkg\defaults" -Force
 Copy-Item "app\resources\*" -Destination "$pkg\resources" -Force
-Copy-Item "$Out\bin\overlayd", "$Out\bin\overlay_ui" -Destination "$pkg\bin" -Force
+Copy-Item "$Out\bin\overlayd", "$Out\bin\overlay_ui", "$Out\bin\fpshud" -Destination "$pkg\bin" -Force
 Copy-Item "app\lang\*.json" -Destination "$pkg\lang" -Force
 
 Write-Host "=== done"

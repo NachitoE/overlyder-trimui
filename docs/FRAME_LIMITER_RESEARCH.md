@@ -155,9 +155,11 @@ reviewed first, and the limiter was then implemented following that plan.
 
 1. One app-owned `/etc/ld.so.preload` line, created by `install.sh` and
    removed by `uninstall.sh`; other entries are preserved.
-2. Cap values: **Off / 30 / 20** — whole divisions of the device's 60 Hz
-   panel. 40/45 were left out because they cannot be evenly paced on 60 Hz;
-   the fpsvita caveat about frame-count-dependent games is documented.
+2. Cap values: a slider from **5 to 60 in steps of 5**, plus **No cap** at the
+   far right. 30 and 20 are the whole divisions of the 60 Hz panel and pace
+   most cleanly; the fpsvita caveat about frame-count-dependent games is
+   documented. The feature is hidden behind an experimental toggle in the
+   config app.
 3. The shim is a Zig-built `liboverlyder_pace.so` (`-shared -fPIC`) and was
    verified with two instrumented programs (fbdev panning and
    `SDL_RenderPresent`) plus an install/uninstall round trip — see

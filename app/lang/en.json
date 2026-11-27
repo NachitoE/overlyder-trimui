@@ -89,6 +89,8 @@
   "S_KB_HOTKEY_TITLE": "Press shortcut buttons (B: done)",
   "S_CFG_FPSHUD": "FPS counter",
   "S_CFG_FPSLIMIT": "FPS limiter",
+  "S_CFG_FPSLIMEXP": "FPS limiter (experimental)",
+  "S_NOCAP": "No cap",
   "S_HUD_TITLE": "FPS COUNTER",
   "S_HUD_ENABLED": "Enabled",
   "S_HUD_POS": "Position",

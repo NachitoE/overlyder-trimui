@@ -79,14 +79,30 @@ static double cpu_usage(void)
     return pct;
 }
 
-/* The A133 PowerVR debugfs dump reports "idle:on;" / "idle:off;" and the
- * current clock. Sampling that flag over the HUD window gives an approximate
- * GPU busy percentage - there is no devfreq node on this firmware. */
+/* PowerVR's debugfs status exposes a real GPU utilisation counter:
+ *   GPU Utilisation: 3%
+ * The old approach (sampling "idle:on/off" in sunxi_gpu/dump) always read 0
+ * on this firmware because that flag tracks the power domain, not the GPU.
+ * The clock still comes from sunxi_gpu/dump. */
 static void gpu_sample(double *busy_pct, int *mhz)
 {
-    static int samples, busy;
+    char status[1024] = "";
+    FILE *f = fopen("/sys/kernel/debug/pvr/status", "r");
+    if (f) {
+        size_t n = fread(status, 1, sizeof status - 1, f);
+        status[n] = '\0';
+        fclose(f);
+    }
+    char *p = strstr(status, "GPU Utilisation:");
+    if (p) {
+        int pct = -1;
+        if (sscanf(p, "GPU Utilisation: %d%%", &pct) == 1 && pct >= 0) {
+            *busy_pct = pct;
+        }
+    }
+
     char buf[512] = "";
-    FILE *f = fopen("/sys/kernel/debug/sunxi_gpu/dump", "r");
+    f = fopen("/sys/kernel/debug/sunxi_gpu/dump", "r");
     if (f) {
         size_t n = fread(buf, 1, sizeof buf - 1, f);
         buf[n] = '\0';
@@ -96,15 +112,6 @@ static void gpu_sample(double *busy_pct, int *mhz)
         int m = -1;
         if (sscanf(strstr(buf, "Frequency:"), "Frequency:%dMHz", &m) == 1)
             *mhz = m;
-    }
-    if (strstr(buf, "idle:on") || strstr(buf, "idle:off")) {
-        samples++;
-        if (strstr(buf, "idle:off"))
-            busy++;
-    }
-    if (samples >= 4) {
-        *busy_pct = 100.0 * (double)busy / (double)samples;
-        samples = busy = 0;
     }
 }
 

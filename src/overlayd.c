@@ -422,7 +422,7 @@ static void hud_start(void)
  * OverLyder is enabled with a cap configured. */
 static void fps_limit_sync(void)
 {
-    if (g_cfg.fps_limit > 0) {
+    if (g_cfg.fps_limit_enabled && g_cfg.fps_limit > 0) {
         FILE *f = fopen(FPS_LIMIT_FILE, "w");
         if (f) {
             fprintf(f, "%d\n", g_cfg.fps_limit);

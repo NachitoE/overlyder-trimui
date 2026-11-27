@@ -233,6 +233,7 @@ void cfg_defaults(overlay_cfg *c)
     c->fps_hud_fields = HUD_F_FPS | HUD_F_FRAME | HUD_F_CPU |
                         HUD_F_GPU | HUD_F_TEMP;
     c->fps_limit = 0;         /* no cap by default */
+    c->fps_limit_enabled = 0; /* experimental: off until enabled in the app */
 }
 
 static void trim(char *s)
@@ -328,9 +329,11 @@ int cfg_load(overlay_cfg *c)
             unsigned long bits = strtoul(v, NULL, 0);
             /* Unknown bits are dropped so a future field cannot leak in. */
             c->fps_hud_fields = (unsigned)bits & HUD_FIELDS_ALL;
+        } else if (!strcasecmp(k, "fps_limit_enabled")) {
+            c->fps_limit_enabled = atoi(v) ? 1 : 0;
         } else if (!strcasecmp(k, "fps_limit")) {
             int n = atoi(v);
-            c->fps_limit = (n == 30 || n == 20) ? n : 0;
+            c->fps_limit = (n >= 5 && n <= 60) ? n : 0;
         } else if (!strcasecmp(k, "ledcolor")) {
             const char *hex = v;
             if (*hex == '#')

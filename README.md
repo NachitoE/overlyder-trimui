@@ -27,7 +27,7 @@ Hold the Home button (or a combo you choose) and a Switch-style overlay slides o
 - No patches or setup inside the game
 - Trigger, hold time, language (Spanish, English, Portuguese, from JSON files) and the SIGSTOP/layer mode set from the app
 - Optional persistent, read-only FPS counter: FPS, frametime, CPU/GPU usage, temperatures and frequencies in any corner (simple text or window), configured from the overlay
-- Optional global frame limiter (Off / 30 / 20 fps) for emulators and ports, via an app-owned LD_PRELOAD shim; no game files or clocks are changed
+- Optional global frame limiter (5–60 fps in steps of 5, or no cap) for emulators and ports, hidden behind an experimental toggle in the app; no game files or clocks are changed
 - Built-in updater in the app: shows the installed version and checks GitHub releases for a newer one
 
 ## Install
@@ -41,8 +41,8 @@ If you're on the device over SSH, run `sh install.sh` as root from the repo root
 | | |
 | --- | --- |
 | Open the panel | hold <kbd>Home</kbd> for about 700 ms |
-| Move around | D-pad or stick |
-| Change a value | left/right |
+| Move around | Up/Down on the D-pad or stick |
+| Change a value / pick WiFi or BT | left/right (they never move the row selection) |
 | Close it | <kbd>B</kbd> or <kbd>Home</kbd> |
 
 ### FPS counter
@@ -57,9 +57,11 @@ game settings. See [`docs/FPS_HUD.md`](docs/FPS_HUD.md).
 
 ### Frame limiter
 
-The **Limitador FPS** row in the same panel cycles Off → 30 fps → 20 fps. It
-paces frame presentation for emulators and ports with a small LD_PRELOAD
-library installed inside the app (one line in `/etc/ld.so.preload`, removed on
+First enable **FPS limiter (experimental)** in the OverLyder app; only then the
+**Limitador FPS** row appears in the panel. It is a slider: Left/Right move in
+5 fps steps from 5 to 60, and the far right is **No cap** (default). It paces
+frame presentation for emulators and ports with a small LD_PRELOAD library
+installed inside the app (one line in `/etc/ld.so.preload`, removed on
 uninstall). It is separate from the read-only counter and never overclocks or
 edits game files. See [`docs/FRAME_LIMITER.md`](docs/FRAME_LIMITER.md).
 

@@ -8,7 +8,7 @@
  *
  * The library is listed in /etc/ld.so.preload (one line, installed and removed
  * by OverLyder). It is a NO-OP unless:
- *   - /tmp/overlyder_fps_limit contains 30 or 20 (written by overlayd), and
+ *   - /tmp/overlyder_fps_limit contains 5..60 (written by overlayd), and
  *   - the executable lives under /mnt/SDCARD/ but is not part of OverLyder.
  * OVERLYDER_PACE_TEST=<fps> forces pacing for any process (test harness only).
  *
@@ -86,7 +86,7 @@ static int target_fps(void)
             fclose(f);
         }
     }
-    if (want != 30 && want != 20)
+    if (want < 5 || want > 60)
         return 0;
     if (!is_game())
         return 0;

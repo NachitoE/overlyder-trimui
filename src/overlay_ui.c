@@ -24,7 +24,7 @@
 enum { IT_SLIDER = 0, IT_ACTION = 1, IT_TOGGLE = 2 };
 enum {
     ACT_NONE = 0, ACT_CLOSE, ACT_EXIT_GAME, ACT_REBOOT, ACT_POWEROFF,
-    ACT_KEYBOARD, ACT_FPSHUD, ACT_FPSLIMIT
+    ACT_KEYBOARD, ACT_FPSHUD
 };
 enum {
     I_VOL = 0, I_BRI, I_CON, I_EXP, I_SAT, I_TMP,
@@ -75,7 +75,7 @@ static item_t items[] = {
     { "Silenciar",   IT_TOGGLE, ACT_NONE,      0,  0, GL_MUTE },
     { "Teclado",     IT_ACTION, ACT_KEYBOARD,  0,  0, GL_KEYBOARD },
     { "Contador FPS", IT_ACTION, ACT_FPSHUD,   0,  0, GL_FPS },
-    { "Limitador FPS", IT_ACTION, ACT_FPSLIMIT, 0,  0, GL_FPS },
+    { "Limitador FPS", IT_SLIDER, ACT_NONE,     1,  0, GL_FPS },
     { "Continuar",   IT_ACTION, ACT_CLOSE,     0,  0, GL_PLAY },
     { "Salir juego", IT_ACTION, ACT_EXIT_GAME, 0,  0, GL_EXIT },
     { "Reiniciar",   IT_ACTION, ACT_REBOOT,    0,  0, GL_REBOOT },
@@ -110,6 +110,7 @@ static int g_debug = 0;
 static int g_busy = 0;
 static int g_keep_overlay = 0;
 static int g_led_color_changed = 0;
+static int g_fps_limit_changed = 0;
 static int g_mode_cfg = 0;
 static int g_closing = 0;
 static long g_anim_start = 0;
@@ -158,7 +159,7 @@ static int g_text_to_gamepad = 0;       /* OVERLAY_TEXT_TO_GAMEPAD=1 */
 enum {
     CFG_ESTADO = 0, CFG_GATILLO,
     CFG_K1, CFG_K2, CFG_K3, CFG_K4,
-    CFG_UMBRAL, CFG_CONFIRMAR, CFG_IDIOMA, CFG_SIGSTOP, CFG_KBMODE,
+    CFG_UMBRAL, CFG_CONFIRMAR, CFG_IDIOMA, CFG_SIGSTOP, CFG_FPSLIMEXP, CFG_KBMODE,
     CFG_KBHOTKEY, CFG_LEARN, CFG_RESET, CFG_ABOUT, CFG_UPDATE, CFG_LISTO, NCFG
 };
 
@@ -227,6 +228,20 @@ static int g_about = 0;
 
 static overlay_cfg g_cfg;
 static app_manifest g_manifest;
+
+/* The limiter row only exists when the experimental switch is on in the app. */
+static int item_visible(int i)
+{
+    return i != I_FPSLIMIT || g_cfg.fps_limit_enabled;
+}
+
+static int visible_item_count(void)
+{
+    int n = 0;
+    for (int i = 0; i < NITEMS; i++)
+        if (item_visible(i)) n++;
+    return n;
+}
 
 /* Self-updater state (CrossMix config app only). */
 enum {
@@ -967,6 +982,22 @@ static int current_brightness(void)
     return (bl >= 0 && bl <= 10) ? bl : -1;
 }
 
+/* FPS limiter slider: 13 stops. 0..11 = 5..60 fps in steps of 5,
+ * 12 = no cap. The item's value stores the stop index directly. */
+#define FPSLIMIT_STOPS 12 /* index 12 = no cap */
+static int fpslimit_index(int limit)
+{
+    if (limit <= 0) return FPSLIMIT_STOPS;
+    int idx = limit / 5 - 1;
+    if (idx < 0) idx = 0;
+    if (idx > FPSLIMIT_STOPS - 1) idx = FPSLIMIT_STOPS - 1;
+    return idx;
+}
+static int fpslimit_value(int idx)
+{
+    return idx >= FPSLIMIT_STOPS ? 0 : (idx + 1) * 5;
+}
+
 static void item_init_values(void)
 {
     int vol = current_volume();
@@ -994,6 +1025,7 @@ static void item_init_values(void)
         items[I_LEDBRI].value = 0;
     items[I_LEDCOLOR].value = led_rgb_to_value(g_cfg.led_color);
     items[I_MUTE].value = 0; /* start unmuted; mute always saves current volume */
+    items[I_FPSLIMIT].value = fpslimit_index(g_cfg.fps_limit);
     g_saved_vol = items[I_VOL].value;
 
     /* Image settings persist as 0..10 and are restored as value*10, so their
@@ -1088,6 +1120,11 @@ static void item_apply(int idx)
         g_led_color_changed = 1;
         break;
     }
+    case I_FPSLIMIT:
+        g_cfg.fps_limit = fpslimit_value(it->value);
+        /* Defer the SD write until the panel closes (D-pad autorepeat). */
+        g_fps_limit_changed = 1;
+        break;
     case I_MUTE:
         if (it->value) {
             g_saved_vol = items[I_VOL].value;
@@ -1119,6 +1156,13 @@ static void item_apply(int idx)
 
 static void item_value_text(int idx, char *buf, size_t n)
 {
+    if (idx == I_FPSLIMIT) {
+        if (items[idx].value >= FPSLIMIT_STOPS)
+            snprintf(buf, n, "%s", TR(S_NOCAP));
+        else
+            snprintf(buf, n, "%d fps", fpslimit_value(items[idx].value));
+        return;
+    }
     if (idx == I_TMP)
         snprintf(buf, n, "%+d", items[idx].value - 50);
     else if (idx == I_LEDCOLOR) {
@@ -1729,6 +1773,8 @@ static void compose(void)
     draw_text(clk, px + PANEL_W - 28, PANEL_TOP + 24, g_f_mid, 0x9698A2, 2);
 
     for (int i = 0; i < NITEMS; i++) {
+        if (!item_visible(i))
+            continue;
         item_t *it = &items[i];
         int y = ROW_TOP + i * ROW_H;
         int focused = (i == g_sel);
@@ -1754,30 +1800,23 @@ static void compose(void)
             if (it->kind == IT_SLIDER) {
                 if (i == I_LEDCOLOR)
                     draw_color_slider(px + 76, y + 22, PANEL_W - 104, it->value, focused);
+                else if (i == I_FPSLIMIT)
+                    draw_row_slider(px + 76, y + 22, PANEL_W - 104,
+                                    it->value * 100 / FPSLIMIT_STOPS, focused);
                 else
                     draw_row_slider(px + 76, y + 22, PANEL_W - 104, it->value, focused);
             }
         } else {
-            if (i == I_FPSLIMIT) {
-                char lv[16];
-                if (g_cfg.fps_limit)
-                    snprintf(lv, sizeof lv, "%d fps", g_cfg.fps_limit);
-                else
-                    snprintf(lv, sizeof lv, "%s", TR(S_OFF));
-                draw_text(lv, px + PANEL_W - 28, y + 2, g_f_small,
-                          focused ? 0xE62037 : 0x9698A2, 2);
-            } else {
-                draw_text(disabled ? "-" : (focused ? TR(S_ACCEPT) : ">"),
-                          px + PANEL_W - 28, y + 2, g_f_small,
-                          focused ? 0xE62037 : 0x7E808C, 2);
-            }
+            draw_text(disabled ? "-" : (focused ? TR(S_ACCEPT) : ">"),
+                      px + PANEL_W - 28, y + 2, g_f_small,
+                      focused ? 0xE62037 : 0x7E808C, 2);
         }
     }
 
     /* WiFi / Bluetooth: two circular buttons in a strip under the list.
      * Green = on, grey = off; the focused one gets a wider highlight disc. */
     {
-        int strip_top = ROW_TOP + NITEMS * ROW_H;
+        int strip_top = ROW_TOP + visible_item_count() * ROW_H;
         int cy = strip_top + 24;
         int r = 20, step = 36;
         int cxs[2] = { px + PANEL_W / 2 - step, px + PANEL_W / 2 + step };
@@ -1948,6 +1987,7 @@ static void config_save(void)
         fprintf(f, "fps_hud_pos=%d\n", g_cfg.fps_hud_pos);
         fprintf(f, "fps_hud_style=%d\n", g_cfg.fps_hud_style);
         fprintf(f, "fps_hud_fields=%u\n", g_cfg.fps_hud_fields);
+        fprintf(f, "fps_limit_enabled=%d\n", g_cfg.fps_limit_enabled ? 1 : 0);
         fprintf(f, "fps_limit=%d\n", g_cfg.fps_limit);
         fprintf(f, "kbd_trigger=");
         {
@@ -2150,6 +2190,7 @@ static void config_activate(void)
         items_set_language();
         break;
     case CFG_SIGSTOP:   g_cfg_sigstop = !g_cfg_sigstop; break;
+    case CFG_FPSLIMEXP: g_cfg.fps_limit_enabled = !g_cfg.fps_limit_enabled; break;
     case CFG_KBMODE:    g_cfg_kb_mode = (g_cfg_kb_mode == 1) ? 2 : 1; break;
     case CFG_KBHOTKEY:
         g_kb_learning = 1;
@@ -2260,6 +2301,7 @@ static void config_compose(void)
     snprintf(labels[CFG_CONFIRMAR], sizeof labels[0], "%s", TR(S_CFG_CONFIRMAR));
     snprintf(labels[CFG_IDIOMA], sizeof labels[0], "%s", TR(S_CFG_IDIOMA));
     snprintf(labels[CFG_SIGSTOP], sizeof labels[0], "%s", TR(S_CFG_SIGSTOP));
+    snprintf(labels[CFG_FPSLIMEXP], sizeof labels[0], "%s", TR(S_CFG_FPSLIMEXP));
     snprintf(labels[CFG_KBMODE], sizeof labels[0], "%s", TR(S_CFG_KBMODE));
     snprintf(labels[CFG_KBHOTKEY], sizeof labels[0], "%s", TR(S_CFG_KBHOTKEY));
     snprintf(labels[CFG_LEARN], sizeof labels[0], "%s", TR(S_LEARN));
@@ -2280,6 +2322,8 @@ static void config_compose(void)
      * Internally g_cfg_sigstop is no_sigstop (1 = no SIGSTOP). */
     snprintf(values[CFG_SIGSTOP], sizeof values[0], "%s",
              g_cfg_sigstop ? TR(S_NO) : TR(S_SI));
+    snprintf(values[CFG_FPSLIMEXP], sizeof values[0], "%s",
+             g_cfg.fps_limit_enabled ? TR(S_SI) : TR(S_NO));
     snprintf(values[CFG_KBMODE], sizeof values[0], "%s",
              g_cfg_kb_mode == 1 ? TR(S_KB_FULL) : TR(S_KB_COMPACT));
     if (g_kb_custom_count == 0) {
@@ -2299,12 +2343,12 @@ static void config_compose(void)
     snprintf(values[CFG_UPDATE], sizeof values[0], "v%s", g_manifest.version);
     values[CFG_LISTO][0] = '\0';
 
-    /* 16 rows max: keep them above the footer at y=684. */
-    int y0 = 140, row = 0;
+    /* 17 rows max: keep them above the footer at y=684. */
+    int y0 = 128, row = 0;
     for (int i = 0; i < NCFG; i++) {
         if (!cfg_visible(i))
             continue;
-        int y = y0 + row * 32;
+        int y = y0 + row * 30;
         row++;
         int focused = (i == g_cfg_sel);
         fill_round_a(220, y, SCR_W - 440, 28, 10,
@@ -2635,11 +2679,27 @@ static void do_exit_game(void)
     g_quit = 1;
 }
 
-static void move_sel(int d) { g_sel = (g_sel + d + NSEL) % NSEL; }
+static void move_sel(int d)
+{
+    for (int n = 0; n < NSEL; n++) {
+        g_sel = (g_sel + d + NSEL) % NSEL;
+        if (g_sel == SEL_RADIO || item_visible(g_sel))
+            break;
+    }
+}
 
 static void adjust_value(int d)
 {
     item_t *it = &items[g_sel];
+    if (g_sel == I_FPSLIMIT) {
+        int v = clampi(it->value + d, 0, FPSLIMIT_STOPS);
+        if (v != it->value) {
+            it->value = v;
+            item_apply(g_sel);
+            logm("fps limit = %d", g_cfg.fps_limit);
+        }
+        return;
+    }
     if (it->kind == IT_TOGGLE) {
         it->value = it->value ? 0 : 1;
         item_apply(g_sel);
@@ -2690,8 +2750,8 @@ static void horiz_move(int dir)
             g_radio = (dir < 0) ? 0 : 1; /* left = WiFi, right = Bluetooth */
         else if (items[g_sel].kind == IT_SLIDER || items[g_sel].kind == IT_TOGGLE)
             adjust_value(dir);
-        else
-            move_sel(dir);
+        /* Left/Right never navigates the list: it only changes a value or
+         * picks WiFi/BT. Up/Down (or the stick) moves between rows. */
     }
 }
 
@@ -2785,11 +2845,6 @@ static void activate(void)
     }
     if (it->action == ACT_FPSHUD) {
         hud_sub_open();
-        return;
-    }
-    if (it->action == ACT_FPSLIMIT) {
-        g_cfg.fps_limit = g_cfg.fps_limit == 0 ? 30 : (g_cfg.fps_limit == 30 ? 20 : 0);
-        config_save();
         return;
     }
     if (it->action == ACT_EXIT_GAME && !g_has_game)
@@ -2933,8 +2988,11 @@ int main(int argc, char **argv)
     if (!g_f_icon)
         logm("icon font unavailable (%s)", iconfont);
 
-    if (!g_mode_cfg)
+    if (!g_mode_cfg) {
         item_init_values();
+        if (g_sel != SEL_RADIO && !item_visible(g_sel))
+            move_sel(1);
+    }
 
     char dev[64];
     int evfd = -1;
@@ -2970,10 +3028,12 @@ int main(int argc, char **argv)
 
     g_open_at = now_ms();
     g_anim_start = g_open_at;
+    int trigger_mask = 0;
+    for (int i = 0; i < g_cfg.trigger_count; i++)
+        trigger_mask |= 1 << (g_cfg.trigger[i] & 31);
     if (!g_mode_cfg) {
         /* assume the configured trigger keys are held while the overlay opens */
-        for (int i = 0; i < g_cfg.trigger_count; i++)
-            g_trigger_held |= 1 << (g_cfg.trigger[i] & 31);
+        g_trigger_held = trigger_mask;
         const char *ok = getenv("OVERLAY_OPEN_KEYBOARD");
         if (ok && atoi(ok)) {
             g_kb_only = 1;
@@ -3005,8 +3065,13 @@ int main(int argc, char **argv)
                     if (!g_mode_cfg && now_ms() - g_kb_closed_at < 400)
                         continue;
                     if (e->type == EV_KEY && e->value == 0) {
-                        g_trigger_held &= ~(1 << (e->code & 31));
-                        g_trigger_released_at = now_ms();
+                        int bit = 1 << (e->code & 31);
+                        g_trigger_held &= ~bit;
+                        /* Only the actual trigger key starts the grace. Any
+                         * other release (D-pad, A, volume...) must not make
+                         * a following B/Home press be ignored. */
+                        if (trigger_mask & bit)
+                            g_trigger_released_at = now_ms();
                         continue;
                     }
                     if (e->type == EV_KEY && e->value == 1) {
@@ -3017,9 +3082,9 @@ int main(int argc, char **argv)
                          * period, otherwise a long Home hold closes the UI. */
                         if (g_trigger_held & bit) {
                             /* ignored */
-                        } else if (!g_mode_cfg &&
+                        } else if ((trigger_mask & bit) && !g_mode_cfg &&
                                    now_ms() - g_trigger_released_at < 600) {
-                            /* ignored */
+                            /* ignored: only the trigger key itself */
                         } else if (!g_mode_cfg && now_ms() - g_open_at < 300) {
                             /* ignore events queued from the opening gesture */
                         } else if (g_mode_cfg && g_upd_state != UPD_NONE) {
@@ -3269,6 +3334,8 @@ int main(int argc, char **argv)
     SDL_Quit();
     if (g_led_color_changed)
         cfg_update_led_color(&g_cfg, g_cfg.led_color, 1);
+    if (g_fps_limit_changed)
+        config_save();
     logm("ui exit code %d", g_exit_code);
     return g_exit_code;
 }

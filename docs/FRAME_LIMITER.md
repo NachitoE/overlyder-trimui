@@ -11,10 +11,12 @@ has no performance controls.
 
 ## 1. What it does
 
-A cap of **30** or **20 fps** sleeps until the next frame deadline before each
-present, so frames are evenly spaced. On this device the panel runs at 60 Hz
+A cap of **5, 10, … 60 fps** (steps of 5) sleeps until the next frame deadline
+before each present, so frames are evenly spaced. **No cap** is the default.
+On this device the panel runs at 60 Hz
 (`/sys/class/disp/disp/attr/sys` → `ref_fps:60`), so 30 and 20 are whole
-divisions of the refresh rate and pace cleanly.
+divisions of the refresh rate and pace most cleanly; other values still work
+but may not align perfectly with vsync.
 
 `Off` (default) does nothing at all: no sleeps, no extra work beyond a cached
 check of a marker file.
@@ -44,8 +46,9 @@ setting is modified. A restart of the app (or the device) re-reads the config.
 
 The shim is a no-op unless both are true:
 
-1. `/tmp/overlyder_fps_limit` contains `30` or `20` (written by `overlayd` from
-   `overlay.cfg` while the app is enabled); and
+1. `/tmp/overlyder_fps_limit` contains `5`–`60` (written by `overlayd` from
+   `overlay.cfg` while the app is enabled and the experimental switch is on);
+   and
 2. `/proc/self/exe` is under `/mnt/SDCARD/` but **not** under
    `/mnt/SDCARD/Apps/OverLyder/` (i.e. a game, not our UI/daemon/firmware).
 
@@ -69,18 +72,25 @@ stall, and is thread-safe with an atomic compare-and-swap on the deadline.
 
 ## 4. Configuration
 
-In the **in-game overlay** (hold the hotkey): a new **Limitador FPS** row below
-**Contador FPS**. Press A to cycle:
+The limiter is **experimental** and starts disabled. In the CrossMix app there
+is a **FPS limiter (experimental)** toggle (`fps_limit_enabled=`). While it is
+off, the limiter row is **hidden** in the in-game overlay and no marker is
+written. Turning it on from the app makes the row appear.
+
+In the **in-game overlay** (hold the hotkey), **Limitador FPS** is a slider
+below **Contador FPS**:
 
 ```
-Off  →  30 fps  →  20 fps  →  Off
+5 fps ← … ← 60 fps → Sin límite (no cap)
 ```
 
-The current value is shown on the right of the row. `config_save()` writes it
-to `/mnt/SDCARD/System/etc/overlay.cfg`:
+Left/Right move in 5 fps steps; rightmost position is **No cap** (the default).
+The value is shown on the right of the row. The SD write is deferred until the
+panel closes. `overlay.cfg` stores:
 
 ```
-fps_limit=0     # 0 = off, 30 or 20
+fps_limit_enabled=0   # experimental switch, set from the app
+fps_limit=0           # 0 = no cap, else 5..60 in steps of 5
 ```
 
 Because the panel is a child of `overlayd`, changing it there must not restart
@@ -124,22 +134,24 @@ One calls `FBIOPAN_DISPLAY`, the other calls `SDL_RenderPresent` through
 With marker `30` but the same binary copied to `/tmp` (not a game path), the
 rate stayed at 59.69 fps: the path gate works.
 
-### 5.3 Overlay row
+### 5.3 Experimental flag and slider
 
-Driven through `vpad` with a FIFO (11 D-pad presses → `activate sel=11
-kind=1 action=7`):
+With `fps_limit_enabled=0`, 11 D-pad downs landed on `sel=12 kind=1 action=1`
+(**Continuar**) and pressing A closed the panel: the limiter row did not exist.
+Toggling **FPS limiter (experimental)** in the app wrote `fps_limit_enabled=1`.
+
+With the flag on, 11 downs reached the slider (`sel=11`). Left/Right through
+the values gave:
 
 ```
-after A#1: fps_limit=30
-after A#2: fps_limit=20
-after A#3: fps_limit=0
-after A#4: fps_limit=30
-...
-after panel close: marker=30
+no cap → 60 → 55 → 60 → no cap      (config after close: fps_limit=0, no marker)
+no cap → 60 → 55 → 50               (config after close: fps_limit=50, marker=50)
 ```
 
-The panel stayed open during the changes and the marker appeared only after it
-closed (`overlayd` is blocked in `run_overlay()` while the panel is up).
+A binary doing 200 presents with marker `50` measured **48.74 fps**; the shim
+accepts any 5–60 value, not just 30/20. The panel stayed open while changing
+the slider and the marker appeared after it closed (`overlayd` is blocked in
+`run_overlay()` while the panel is up).
 
 ## 6. Limitations / risks
 

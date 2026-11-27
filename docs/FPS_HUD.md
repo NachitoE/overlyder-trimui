@@ -86,7 +86,7 @@ overclock controls live in this submenu. The frame limiter is a separate
 | FPS | `FBIOGET_VSCREENINFO` on `/dev/fb0`, polled every 2 ms for 250 ms; count `yoffset` changes | Emulators/games on this firmware present by panning fb0. A flip is one presented frame. Renderers that never pan fb0 will show `--`. |
 | FRAME | exponential moving average of the time between two flips | Window-limited; converges over a few updates. |
 | CPU | `cpu` line of `/proc/stat`, `100 * (1 - idle_delta/total_delta)` | All cores aggregated, sampled between redraws. |
-| GPU | `idle:on;` / `idle:off;` in `/sys/kernel/debug/sunxi_gpu/dump`, 4 samples per update | **Estimate** of GPU busy time. This kernel has no GPU devfreq node; see `FRAME_LIMITER_RESEARCH.md`. |
+| GPU | `GPU Utilisation: N%` in `/sys/kernel/debug/pvr/status` | Real PowerVR counter. The earlier approach (sampling `idle:on/off` in `sunxi_gpu/dump`) always read 0 because that flag tracks the power domain, not the GPU. |
 | TEMP | `/sys/class/thermal/thermal_zone0/temp` ÷ 1000 | `cpu_thermal_zone` on this device. Zones 1 and 2 (GPU/DDR) are also read into the status file. |
 | CPUFRQ | `scaling_cur_freq` of `policy0` ÷ 1000 | Read only; the HUD never writes it. |
 | GPUFRQ | `Frequency:` from the same sunxi_gpu dump | Read only. |
@@ -233,14 +233,30 @@ A `kill -9` of `fpshud` left channel 2 enabled; restarting the daemon logged
 `cleared stale layer on ch2 (pid 13039 gone)` and the new HUD reclaimed the
 channel cleanly.
 
+### 4.7 GPU counter, navigation and close fixes
+
+* `/sys/kernel/debug/pvr/status` reports a real `GPU Utilisation` line. Sampling
+  it over six seconds gave `2, 4, 4, 3, 3, 3 %` from the kernel and `3, 3, 3,
+  4, 4, 4 %` in the HUD status file — it now tracks actual GPU use instead of
+  always showing 0.
+* Left/Right on the D-pad no longer navigates the overlay list. On an action
+  row, 11 Downs + Left/Right + A still reported `activate sel=12 kind=1
+  action=1` (Continue) and closed the panel; Left/Right only changes sliders
+  (including the 5 fps limiter steps) or selects WiFi vs Bluetooth.
+* The close bug was caused by **any** key release resetting the 600 ms trigger
+  grace, so a B/Home press after a D-pad or volume interaction was ignored.
+  Now only the configured trigger key's release starts that grace, and the
+  grace applies only to that key. Tested 9 open/close cycles in both modes
+  (SIGSTOP and layer): D-pad→B, volume→Home, and immediate B all closed the
+  panel every time.
+
 ## 5. Limitations
 
 * FPS is derived from fb0 page flips. A renderer that presents through a
   different path (e.g. a pure DRM/dmabuf path) will show `--`; this is a
   read-only observer, there is no hook into the game.
-* GPU usage is a duty-cycle estimate from a debugfs flag, not a hardware
-  counter. It is 0 on the test unit while idle and should be treated as
-  approximate under load.
+* GPU usage is the kernel's own `GPU Utilisation` counter from PowerVR debugfs.
+  It updates ~4 Hz with the HUD; brief spikes may be missed.
 * The HUD needs a free display channel. If `trimui_osdd` or another app owns
   channels 2 and 3, `fpshud` exits and logs `no free hardware layer` to
   `/tmp/overlayd.log`; the panel still works (it falls back to SIGSTOP).

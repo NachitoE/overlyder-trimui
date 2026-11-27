@@ -116,7 +116,8 @@ typedef struct {
     int fps_hud_pos;      /* 0=top-left 1=top-right 2=bottom-left 3=bottom-right */
     int fps_hud_style;    /* HUD_STYLE_SIMPLE / HUD_STYLE_WINDOW */
     unsigned fps_hud_fields; /* bit mask of HUD_F_* rows */
-    int fps_limit;        /* 0 = off, 30 or 20 target fps (global shim) */
+    int fps_limit;        /* 0 = no cap, else 5..60 in steps of 5 */
+    int fps_limit_enabled;/* experimental feature flag from the config app */
 } overlay_cfg;
 
 void cfg_defaults(overlay_cfg *c);

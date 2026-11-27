@@ -42,6 +42,7 @@
 #define OVERLAY_OPEN_FLAG "/tmp/overlyder_overlay_open"
 #define FPS_LIMIT_FILE  "/tmp/overlyder_fps_limit"
 #define PACE_LIB_REL    "/lib/liboverlyder_pace.so"
+#define PRELOAD_PATH    "/etc/ld.so.preload"
 #define HUD_PID_FILE    "/tmp/overlyder_hud.pid"
 #define HUD_STATUS_FILE "/tmp/overlyder_hud.status"
 

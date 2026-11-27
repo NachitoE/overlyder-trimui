@@ -61,9 +61,11 @@ First enable **FPS limiter (experimental)** in the OverLyder app; only then the
 **Limitador FPS** row appears in the panel. It is a slider: Left/Right move in
 5 fps steps from 5 to 60, and the far right is **No cap** (default). It paces
 frame presentation for emulators and ports with a small LD_PRELOAD library
-installed inside the app (one line in `/etc/ld.so.preload`, removed on
-uninstall). It is separate from the read-only counter and never overclocks or
-edits game files. See [`docs/FRAME_LIMITER.md`](docs/FRAME_LIMITER.md).
+installed inside the app. **While the switch is off there is no
+`/etc/ld.so.preload` entry at all**, so nothing is injected into other
+processes and their FPS are untouched. It is separate from the read-only
+counter and never overclocks or edits game files. See
+[`docs/FRAME_LIMITER.md`](docs/FRAME_LIMITER.md).
 
 ### Virtual keyboard
 

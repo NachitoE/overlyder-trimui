@@ -29,6 +29,9 @@
 
 static dev_t g_fb_dev;
 static volatile long long g_next_us;
+static int g_target; /* read once at process start; 0 = absolute no-op */
+
+static int is_game(void);
 
 __attribute__((constructor))
 static void pace_init(void)
@@ -36,6 +39,24 @@ static void pace_init(void)
     struct stat st;
     if (stat("/dev/fb0", &st) == 0)
         g_fb_dev = st.st_rdev;
+
+    /* The cap is decided once, before the game starts rendering. With no cap
+     * the hooks below are a single integer test: no clock_gettime, no file
+     * access, no syscalls at all during play. */
+    int want = 0;
+    const char *force = getenv("OVERLYDER_PACE_TEST");
+    if (force && *force)
+        want = atoi(force);
+    else {
+        FILE *f = fopen(FPS_LIMIT_FILE, "r");
+        if (f) {
+            if (fscanf(f, "%d", &want) != 1)
+                want = 0;
+            fclose(f);
+        }
+    }
+    if (want >= 5 && want <= 60 && is_game())
+        g_target = want;
 }
 
 static long long now_us(void)
@@ -62,36 +83,6 @@ static int is_game(void)
     if (strstr(exe, "/Apps/OverLyder/"))
         return 0;
     return 1;
-}
-
-static int target_fps(void)
-{
-    static long long checked;
-    static int cached;
-    long long t = now_us();
-    if (t - checked < 500000LL)
-        return cached;
-    checked = t;
-    cached = 0;
-
-    int want = 0;
-    const char *force = getenv("OVERLYDER_PACE_TEST");
-    if (force && *force)
-        want = atoi(force);
-    else {
-        FILE *f = fopen(FPS_LIMIT_FILE, "r");
-        if (f) {
-            if (fscanf(f, "%d", &want) != 1)
-                want = 0;
-            fclose(f);
-        }
-    }
-    if (want < 5 || want > 60)
-        return 0;
-    if (!is_game())
-        return 0;
-    cached = want;
-    return want;
 }
 
 static void pace(int fps)
@@ -128,9 +119,8 @@ void eglSwapBuffers(void *display, void *surface)
     static void (*real_fn)(void *, void *);
     if (!real_fn)
         real_fn = (void (*)(void *, void *))dlsym(RTLD_NEXT, "eglSwapBuffers");
-    int fps = target_fps();
-    if (fps)
-        pace(fps);
+    if (g_target)
+        pace(g_target);
     if (real_fn)
         real_fn(display, surface);
 }
@@ -140,9 +130,8 @@ void glXSwapBuffers(void *display, void *drawable)
     static void (*real_fn)(void *, void *);
     if (!real_fn)
         real_fn = (void (*)(void *, void *))dlsym(RTLD_NEXT, "glXSwapBuffers");
-    int fps = target_fps();
-    if (fps)
-        pace(fps);
+    if (g_target)
+        pace(g_target);
     if (real_fn)
         real_fn(display, drawable);
 }
@@ -152,9 +141,8 @@ void SDL_RenderPresent(void *renderer)
     static void (*real_fn)(void *);
     if (!real_fn)
         real_fn = (void (*)(void *))dlsym(RTLD_NEXT, "SDL_RenderPresent");
-    int fps = target_fps();
-    if (fps)
-        pace(fps);
+    if (g_target)
+        pace(g_target);
     if (real_fn)
         real_fn(renderer);
 }
@@ -164,11 +152,22 @@ void SDL_GL_SwapWindow(void *window)
     static void (*real_fn)(void *);
     if (!real_fn)
         real_fn = (void (*)(void *))dlsym(RTLD_NEXT, "SDL_GL_SwapWindow");
-    int fps = target_fps();
-    if (fps)
-        pace(fps);
+    if (g_target)
+        pace(g_target);
     if (real_fn)
         real_fn(window);
+}
+
+/* SDL 1.2 name, still used by some ports. */
+void SDL_GL_SwapBuffers(void)
+{
+    static void (*real_fn)(void);
+    if (!real_fn)
+        real_fn = (void (*)(void))dlsym(RTLD_NEXT, "SDL_GL_SwapBuffers");
+    if (g_target)
+        pace(g_target);
+    if (real_fn)
+        real_fn();
 }
 
 int ioctl(int fd, unsigned long request, ...)
@@ -183,10 +182,10 @@ int ioctl(int fd, unsigned long request, ...)
     void *arg = va_arg(ap, void *);
     va_end(ap);
 
-    if (request == FBIOPAN_DISPLAY && target_fps()) {
+    if (request == FBIOPAN_DISPLAY && g_target) {
         struct stat st;
         if (fstat(fd, &st) == 0 && st.st_rdev == g_fb_dev && g_fb_dev != 0)
-            pace(target_fps());
+            pace(g_target);
     }
     if (real_fn)
         return real_fn(fd, request, arg);

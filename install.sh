@@ -65,24 +65,10 @@ echo "Installing autostart hook..."
 cp -f "$SRC/app/overLyder.start" "$HOOK"
 chmod 755 "$HOOK"
 
-# One pointer line in /etc/ld.so.preload loads the limiter into every game
-# process. The library itself lives inside the app; other entries are kept.
-echo "Registering frame limiter shim..."
-LIBLINE="$APP/lib/liboverlyder_pace.so"
-PRELOAD=/etc/ld.so.preload
-if [ -f "$PRELOAD" ]; then
-    if ! grep -qxF "$LIBLINE" "$PRELOAD"; then
-        cp -a "$PRELOAD" "$PRELOAD.bak.$STAMP"
-        { cat "$PRELOAD"; printf '%s\n' "$LIBLINE"; } > "$PRELOAD.new"
-        cat "$PRELOAD.new" > "$PRELOAD"
-        rm -f "$PRELOAD.new"
-        sync
-    fi
-else
-    printf '%s\n' "$LIBLINE" > "$PRELOAD"
-    chmod 644 "$PRELOAD"
-    sync
-fi
+# The limiter library is installed but NOT registered here: with the
+# experimental switch off, no LD_PRELOAD line exists and user processes are
+# untouched. overlayd adds/removes the single line when the switch changes.
+echo "Frame limiter library installed (inactive until enabled in the app)."
 
 # Upgrade from the old name: remove the previous app and startup hook so two
 # daemons cannot be launched at boot. The shared config in $ETC is preserved.

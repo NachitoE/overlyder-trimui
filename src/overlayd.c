@@ -418,11 +418,89 @@ static void hud_start(void)
     }
 }
 
+/* The preload line only exists while the experimental limiter is active.
+ * With the limiter off there is no global injection at all: user processes
+ * (and their frame rates) are completely untouched. */
+static int preload_has_line(void)
+{
+    char line[512];
+    snprintf(line, sizeof line, "%s%s\n", APP_DIR, PACE_LIB_REL);
+    FILE *f = fopen(PRELOAD_PATH, "r");
+    if (!f)
+        return 0;
+    char buf[512];
+    int found = 0;
+    while (fgets(buf, sizeof buf, f)) {
+        if (!strcmp(buf, line)) {
+            found = 1;
+            break;
+        }
+    }
+    fclose(f);
+    return found;
+}
+
+static void preload_set(int on)
+{
+    char line[512];
+    snprintf(line, sizeof line, "%s%s\n", APP_DIR, PACE_LIB_REL);
+    if (on) {
+        if (preload_has_line())
+            return;
+        FILE *in = fopen(PRELOAD_PATH, "r");
+        FILE *out = fopen(PRELOAD_PATH ".overlyder.tmp", "w");
+        if (!out) {
+            if (in) fclose(in);
+            return;
+        }
+        if (in) {
+            char buf[512];
+            while (fgets(buf, sizeof buf, in))
+                fputs(buf, out);
+            fclose(in);
+        }
+        fputs(line, out);
+        fclose(out);
+        chmod(PRELOAD_PATH ".overlyder.tmp", 0644);
+        if (rename(PRELOAD_PATH ".overlyder.tmp", PRELOAD_PATH) == 0)
+            sync();
+        return;
+    }
+
+    if (!preload_has_line())
+        return;
+    FILE *in = fopen(PRELOAD_PATH, "r");
+    FILE *out = fopen(PRELOAD_PATH ".overlyder.tmp", "w");
+    if (!in || !out) {
+        if (in) fclose(in);
+        if (out) fclose(out);
+        return;
+    }
+    char buf[512];
+    while (fgets(buf, sizeof buf, in)) {
+        if (strcmp(buf, line))
+            fputs(buf, out);
+    }
+    fclose(in);
+    fclose(out);
+    if (rename(PRELOAD_PATH ".overlyder.tmp", PRELOAD_PATH) == 0)
+        sync();
+    /* Remove an empty file so a disabled limiter leaves no trace. */
+    in = fopen(PRELOAD_PATH, "r");
+    if (in) {
+        int c = fgetc(in);
+        fclose(in);
+        if (c == EOF)
+            unlink(PRELOAD_PATH);
+    }
+}
+
 /* The preload shim reads this marker once per process. It exists only while
  * OverLyder is enabled with a cap configured. */
 static void fps_limit_sync(void)
 {
-    if (g_cfg.fps_limit_enabled && g_cfg.fps_limit > 0) {
+    int active = g_cfg.fps_limit_enabled && g_cfg.fps_limit > 0;
+    if (active) {
         FILE *f = fopen(FPS_LIMIT_FILE, "w");
         if (f) {
             fprintf(f, "%d\n", g_cfg.fps_limit);
@@ -432,6 +510,7 @@ static void fps_limit_sync(void)
     } else {
         unlink(FPS_LIMIT_FILE);
     }
+    preload_set(active);
 }
 
 static void hud_stop(void)
@@ -768,6 +847,7 @@ int main(int argc, char **argv)
 
 out:
     hud_stop();
+    preload_set(0);
     unlink(FPS_LIMIT_FILE);
     if (pidfd >= 0) {
         unlink(PID_FILE);

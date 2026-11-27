@@ -25,10 +25,23 @@ if [ -f "$ETC/overlay.cfg" ]; then
     echo "Config backup: $ETC/overlay.cfg.uninstalled.$STAMP"
 fi
 
+# Remove only our loader line; leave any other preload entries untouched.
+PRELOAD=/etc/ld.so.preload
+LIBLINE="$APP/lib/liboverlyder_pace.so"
+if [ -f "$PRELOAD" ] && grep -qxF "$LIBLINE" "$PRELOAD"; then
+    grep -vxF "$LIBLINE" "$PRELOAD" > "$PRELOAD.new" || true
+    if [ -s "$PRELOAD.new" ]; then
+        cat "$PRELOAD.new" > "$PRELOAD"
+    else
+        rm -f "$PRELOAD"
+    fi
+    rm -f "$PRELOAD.new"
+fi
+
 rm -rf "$APP" "$LEGACY_APP"
 rm -f "$HOOK" "$LEGACY_HOOK"
 rm -f "$ETC/overlay.cfg" "$ETC/overlay.disabled"
-rm -f /tmp/overlayd.pid /tmp/overlay_stopped.pids /tmp/overlyder_hud.pid /tmp/overlyder_hud.status /tmp/overlyder_hud_layer /tmp/overlyder_hud_sync /tmp/overlyder_overlay_open
+rm -f /tmp/overlayd.pid /tmp/overlay_stopped.pids /tmp/overlyder_hud.pid /tmp/overlyder_hud.status /tmp/overlyder_hud_layer /tmp/overlyder_hud_sync /tmp/overlyder_overlay_open /tmp/overlyder_fps_limit
 
 sync
 echo "OverLyder uninstalled."

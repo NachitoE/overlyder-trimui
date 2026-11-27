@@ -88,6 +88,7 @@
   "S_CFG_KBHOTKEY": "Atalho do teclado",
   "S_KB_HOTKEY_TITLE": "Pressione os botões do atalho (B: pronto)",
   "S_CFG_FPSHUD": "Contador FPS",
+  "S_CFG_FPSLIMIT": "Limitador FPS",
   "S_HUD_TITLE": "CONTADOR FPS",
   "S_HUD_ENABLED": "Ativado",
   "S_HUD_POS": "Posição",

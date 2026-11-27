@@ -121,7 +121,7 @@ cmd_install() {
         rm -f "$APP/$f" 2>/dev/null
         cp -f "$src/$f" "$APP/$f" 2>/dev/null || { echo "ERR copy"; rm -rf "$TMP"; return; }
     done
-    chmod 755 "$APP/launch.sh" "$APP/overlayctl" "$APP/bin/overlayd" "$APP/bin/overlay_ui" 2>/dev/null
+    chmod 755 "$APP/launch.sh" "$APP/overlayctl" "$APP/bin/overlayd" "$APP/bin/overlay_ui" "$APP/bin/fpshud" "$APP/lib/liboverlyder_pace.so" 2>/dev/null
 
     # A release zip can ship a stale manifest (the 0.0.3 asset had 0.0.2
     # inside). Trust the tag we were asked to install, not the zip's copy.

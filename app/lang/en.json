@@ -88,6 +88,7 @@
   "S_CFG_KBHOTKEY": "Keyboard shortcut",
   "S_KB_HOTKEY_TITLE": "Press shortcut buttons (B: done)",
   "S_CFG_FPSHUD": "FPS counter",
+  "S_CFG_FPSLIMIT": "FPS limiter",
   "S_HUD_TITLE": "FPS COUNTER",
   "S_HUD_ENABLED": "Enabled",
   "S_HUD_POS": "Position",

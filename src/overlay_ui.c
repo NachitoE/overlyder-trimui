@@ -24,11 +24,11 @@
 enum { IT_SLIDER = 0, IT_ACTION = 1, IT_TOGGLE = 2 };
 enum {
     ACT_NONE = 0, ACT_CLOSE, ACT_EXIT_GAME, ACT_REBOOT, ACT_POWEROFF,
-    ACT_KEYBOARD, ACT_FPSHUD
+    ACT_KEYBOARD, ACT_FPSHUD, ACT_FPSLIMIT
 };
 enum {
     I_VOL = 0, I_BRI, I_CON, I_EXP, I_SAT, I_TMP,
-    I_LEDBRI, I_LEDCOLOR, I_MUTE, I_KEYBOARD, I_FPSHUD,
+    I_LEDBRI, I_LEDCOLOR, I_MUTE, I_KEYBOARD, I_FPSHUD, I_FPSLIMIT,
     I_PLAY, I_EXIT, I_REBOOT, I_POWER
 };
 
@@ -75,6 +75,7 @@ static item_t items[] = {
     { "Silenciar",   IT_TOGGLE, ACT_NONE,      0,  0, GL_MUTE },
     { "Teclado",     IT_ACTION, ACT_KEYBOARD,  0,  0, GL_KEYBOARD },
     { "Contador FPS", IT_ACTION, ACT_FPSHUD,   0,  0, GL_FPS },
+    { "Limitador FPS", IT_ACTION, ACT_FPSLIMIT, 0,  0, GL_FPS },
     { "Continuar",   IT_ACTION, ACT_CLOSE,     0,  0, GL_PLAY },
     { "Salir juego", IT_ACTION, ACT_EXIT_GAME, 0,  0, GL_EXIT },
     { "Reiniciar",   IT_ACTION, ACT_REBOOT,    0,  0, GL_REBOOT },
@@ -319,7 +320,7 @@ static void items_set_language(void)
 {
     static const int ids[NITEMS] = {
         S_VOL, S_BRI, S_CON, S_EXP, S_SAT, S_TMP,
-        S_LED_BRI, S_LED_COLOR, S_MUTE, S_KEYBOARD, S_CFG_FPSHUD,
+        S_LED_BRI, S_LED_COLOR, S_MUTE, S_KEYBOARD, S_CFG_FPSHUD, S_CFG_FPSLIMIT,
         S_PLAY, S_EXIT, S_REBOOT, S_POWER
     };
     for (int i = 0; i < NITEMS; i++)
@@ -1113,7 +1114,7 @@ static void item_apply(int idx)
 #define PANEL_X      (SCR_W - PANEL_W - 32)
 #define PANEL_TOP    28
 #define PANEL_H      664
-#define ROW_H        30
+#define ROW_H        28
 #define ROW_TOP      (PANEL_TOP + 88)
 
 static void item_value_text(int idx, char *buf, size_t n)
@@ -1752,14 +1753,24 @@ static void compose(void)
                       focused ? 0xE62037 : 0x9698A2, 2);
             if (it->kind == IT_SLIDER) {
                 if (i == I_LEDCOLOR)
-                    draw_color_slider(px + 76, y + 24, PANEL_W - 104, it->value, focused);
+                    draw_color_slider(px + 76, y + 22, PANEL_W - 104, it->value, focused);
                 else
-                    draw_row_slider(px + 76, y + 24, PANEL_W - 104, it->value, focused);
+                    draw_row_slider(px + 76, y + 22, PANEL_W - 104, it->value, focused);
             }
         } else {
-            draw_text(disabled ? "-" : (focused ? TR(S_ACCEPT) : ">"),
-                      px + PANEL_W - 28, y + 2, g_f_small,
-                      focused ? 0xE62037 : 0x7E808C, 2);
+            if (i == I_FPSLIMIT) {
+                char lv[16];
+                if (g_cfg.fps_limit)
+                    snprintf(lv, sizeof lv, "%d fps", g_cfg.fps_limit);
+                else
+                    snprintf(lv, sizeof lv, "%s", TR(S_OFF));
+                draw_text(lv, px + PANEL_W - 28, y + 2, g_f_small,
+                          focused ? 0xE62037 : 0x9698A2, 2);
+            } else {
+                draw_text(disabled ? "-" : (focused ? TR(S_ACCEPT) : ">"),
+                          px + PANEL_W - 28, y + 2, g_f_small,
+                          focused ? 0xE62037 : 0x7E808C, 2);
+            }
         }
     }
 
@@ -1937,6 +1948,7 @@ static void config_save(void)
         fprintf(f, "fps_hud_pos=%d\n", g_cfg.fps_hud_pos);
         fprintf(f, "fps_hud_style=%d\n", g_cfg.fps_hud_style);
         fprintf(f, "fps_hud_fields=%u\n", g_cfg.fps_hud_fields);
+        fprintf(f, "fps_limit=%d\n", g_cfg.fps_limit);
         fprintf(f, "kbd_trigger=");
         {
             int n = 0;
@@ -2773,6 +2785,11 @@ static void activate(void)
     }
     if (it->action == ACT_FPSHUD) {
         hud_sub_open();
+        return;
+    }
+    if (it->action == ACT_FPSLIMIT) {
+        g_cfg.fps_limit = g_cfg.fps_limit == 0 ? 30 : (g_cfg.fps_limit == 30 ? 20 : 0);
+        config_save();
         return;
     }
     if (it->action == ACT_EXIT_GAME && !g_has_game)

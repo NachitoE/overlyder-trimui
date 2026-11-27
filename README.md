@@ -26,7 +26,8 @@ Hold the Home button (or a combo you choose) and a Switch-style overlay slides o
 - Virtual keyboard: opens from the overlay, sends real key presses to the app underneath and returns to the panel with B/Home
 - No patches or setup inside the game
 - Trigger, hold time, language (Spanish, English, Portuguese, from JSON files) and the SIGSTOP/layer mode set from the app
-- Optional persistent, read-only FPS counter: FPS, frametime, CPU/GPU usage, temperatures and frequencies in any corner, configured from the app
+- Optional persistent, read-only FPS counter: FPS, frametime, CPU/GPU usage, temperatures and frequencies in any corner (simple text or window), configured from the overlay
+- Optional global frame limiter (Off / 30 / 20 fps) for emulators and ports, via an app-owned LD_PRELOAD shim; no game files or clocks are changed
 - Built-in updater in the app: shows the installed version and checks GitHub releases for a newer one
 
 ## Install
@@ -53,6 +54,14 @@ or **Window**, and selects which read-only rows to show (FPS, frametime,
 CPU/GPU usage, temperature, frequencies, battery). The HUD stays on screen
 while you play, drawn on a second hardware display layer; it never changes
 game settings. See [`docs/FPS_HUD.md`](docs/FPS_HUD.md).
+
+### Frame limiter
+
+The **Limitador FPS** row in the same panel cycles Off → 30 fps → 20 fps. It
+paces frame presentation for emulators and ports with a small LD_PRELOAD
+library installed inside the app (one line in `/etc/ld.so.preload`, removed on
+uninstall). It is separate from the read-only counter and never overclocks or
+edits game files. See [`docs/FRAME_LIMITER.md`](docs/FRAME_LIMITER.md).
 
 ### Virtual keyboard
 

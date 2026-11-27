@@ -76,8 +76,8 @@ too many fields are enabled. It is the default so the game is not covered by
 a permanent box.
 
 The counter is deliberately **read-only**: no clocks, no frame cap and no
-overclock controls live in this submenu. The frame limiter will be a separate
-feature.
+overclock controls live in this submenu. The frame limiter is a separate
+**Limitador FPS** row in the panel (see [`FRAME_LIMITER.md`](FRAME_LIMITER.md)).
 
 ## 3. Where each number comes from
 

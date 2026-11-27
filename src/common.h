@@ -40,6 +40,8 @@
 #define HUD_LAYER_FLAG  "/tmp/overlyder_hud_layer"
 #define HUD_SYNC_FILE   "/tmp/overlyder_hud_sync"
 #define OVERLAY_OPEN_FLAG "/tmp/overlyder_overlay_open"
+#define FPS_LIMIT_FILE  "/tmp/overlyder_fps_limit"
+#define PACE_LIB_REL    "/lib/liboverlyder_pace.so"
 #define HUD_PID_FILE    "/tmp/overlyder_hud.pid"
 #define HUD_STATUS_FILE "/tmp/overlyder_hud.status"
 
@@ -114,6 +116,7 @@ typedef struct {
     int fps_hud_pos;      /* 0=top-left 1=top-right 2=bottom-left 3=bottom-right */
     int fps_hud_style;    /* HUD_STYLE_SIMPLE / HUD_STYLE_WINDOW */
     unsigned fps_hud_fields; /* bit mask of HUD_F_* rows */
+    int fps_limit;        /* 0 = off, 30 or 20 target fps (global shim) */
 } overlay_cfg;
 
 void cfg_defaults(overlay_cfg *c);

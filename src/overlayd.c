@@ -418,6 +418,22 @@ static void hud_start(void)
     }
 }
 
+/* The preload shim reads this marker once per process. It exists only while
+ * OverLyder is enabled with a cap configured. */
+static void fps_limit_sync(void)
+{
+    if (g_cfg.fps_limit > 0) {
+        FILE *f = fopen(FPS_LIMIT_FILE, "w");
+        if (f) {
+            fprintf(f, "%d\n", g_cfg.fps_limit);
+            fclose(f);
+            sync();
+        }
+    } else {
+        unlink(FPS_LIMIT_FILE);
+    }
+}
+
 static void hud_stop(void)
 {
     if (g_hud_pid <= 0)
@@ -640,6 +656,7 @@ int main(int argc, char **argv)
         logm("restored LED color #%06X", g_cfg.led_color);
     }
 
+    fps_limit_sync();
     if (g_cfg.fps_hud)
         hud_start();
 
@@ -668,6 +685,7 @@ int main(int argc, char **argv)
         if (access(HUD_SYNC_FILE, F_OK) == 0) {
             unlink(HUD_SYNC_FILE);
             cfg_load(&g_cfg);
+            fps_limit_sync();
             if (!g_cfg.fps_hud)
                 hud_stop();
             else if (g_hud_pid <= 0 || kill(g_hud_pid, 0) != 0) {
@@ -750,6 +768,7 @@ int main(int argc, char **argv)
 
 out:
     hud_stop();
+    unlink(FPS_LIMIT_FILE);
     if (pidfd >= 0) {
         unlink(PID_FILE);
         close(pidfd);

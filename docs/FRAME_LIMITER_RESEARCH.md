@@ -1,10 +1,11 @@
 # Frame limiter research (deferred)
 
-This document collects the research done before implementing the read-only FPS
-HUD. The frame limiter was **not implemented yet**: the user asked to finish,
-review and commit the HUD first. The accepted direction is a global
-swap-pacing shim (`LD_PRELOAD`) so it works for **both emulators and PortMaster
-games**; the exact injection mechanism still has to be agreed (see §5).
+This document collects the research that led to the implementation. The
+read-only FPS HUD came first; the frame limiter that follows from this research
+is now implemented in [`FRAME_LIMITER.md`](FRAME_LIMITER.md). The accepted
+direction was a global swap-pacing shim (`LD_PRELOAD`) so it works for **both
+emulators and PortMaster games**, injected with a single app-owned
+`/etc/ld.so.preload` line (see §5).
 
 ## 1. Question
 
@@ -147,21 +148,23 @@ The shim has to be loaded by **every game process**. Findings from the device:
   constraint that the feature stay contained in OverLyder.
 * A CPU-profile-only approach is safe but does not smooth frames — rejected.
 
-**Status:** the user accepted the single `ld.so.preload` pointer as the thing
-to "keep in mind", but asked to implement and review the FPS HUD **first**.
-Do not add a limiter row or touch the loader until that review is done.
+**Status:** the single `ld.so.preload` pointer was accepted, the FPS HUD was
+reviewed first, and the limiter was then implemented following that plan.
 
-## 6. Open questions for the next iteration
+## 6. Decisions taken
 
-1. Confirm the single `/etc/ld.so.preload` pointer is acceptable at install
-   time (it is one line, pointing into the app, removed by `uninstall.sh`).
-2. Decide the cap values. Recommended: Off / 30 / 20 (whole divisions of the
-   device's 60 Hz panel); optionally 40 / 45 with the fpsvita caveat.
-3. Decide whether to compile a `liboverlyder_pace.so` with Zig
-   (`-shared -fPIC`) and how to verify it with `fakegame`, a RetroArch core
-   and a PortMaster port before/after numbers.
-4. Document clearly that caps change game speed for frame-count-dependent
-   games and that statically linked games cannot be intercepted.
+1. One app-owned `/etc/ld.so.preload` line, created by `install.sh` and
+   removed by `uninstall.sh`; other entries are preserved.
+2. Cap values: **Off / 30 / 20** — whole divisions of the device's 60 Hz
+   panel. 40/45 were left out because they cannot be evenly paced on 60 Hz;
+   the fpsvita caveat about frame-count-dependent games is documented.
+3. The shim is a Zig-built `liboverlyder_pace.so` (`-shared -fPIC`) and was
+   verified with two instrumented programs (fbdev panning and
+   `SDL_RenderPresent`) plus an install/uninstall round trip — see
+   `FRAME_LIMITER.md` §5. Testing against a real RetroArch core and a
+   PortMaster port is still desirable.
+4. Static binaries and other present paths cannot be intercepted; this is
+   documented as a limitation rather than worked around.
 
 ## 7. Sources
 

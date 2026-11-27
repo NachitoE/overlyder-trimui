@@ -55,18 +55,24 @@ Write-Host "=== fpshud"
     -L $SdlLib -lSDL2 -lSDL2_ttf -lm -o "$Out/bin/fpshud"
 if ($LASTEXITCODE -ne 0) { throw "fpshud build failed" }
 
+Write-Host "=== frame limiter shim (LD_PRELOAD)"
+New-Item -ItemType Directory -Force -Path "$Out\lib" | Out-Null
+& $Zig @common -shared -fPIC src/pace_shim.c -ldl -o "$Out/lib/liboverlyder_pace.so"
+if ($LASTEXITCODE -ne 0) { throw "pace shim build failed" }
+
 Write-Host "=== vpad (test tool)"
 & $Zig @common tools/vpad.c -o "$Out/bin/vpad"
 if ($LASTEXITCODE -ne 0) { throw "vpad build failed" }
 
 Write-Host "=== release package"
 $pkg = "$Out\OverLyder"
-New-Item -ItemType Directory -Force -Path "$pkg\bin", "$pkg\resources", "$pkg\defaults", "$pkg\lang" | Out-Null
+New-Item -ItemType Directory -Force -Path "$pkg\bin", "$pkg\resources", "$pkg\defaults", "$pkg\lang", "$pkg\lib" | Out-Null
 Copy-Item "app\config.json", "app\manifest.json", "app\icon.png", "app\launch.sh", "app\overlayctl", `
           "app\overLyder.start", "app\updater.sh" -Destination $pkg -Force
 Copy-Item "app\defaults\overlay.cfg" -Destination "$pkg\defaults" -Force
 Copy-Item "app\resources\*" -Destination "$pkg\resources" -Force
 Copy-Item "$Out\bin\overlayd", "$Out\bin\overlay_ui", "$Out\bin\fpshud" -Destination "$pkg\bin" -Force
+Copy-Item "$Out\lib\liboverlyder_pace.so" -Destination "$pkg\lib" -Force
 Copy-Item "app\lang\*.json" -Destination "$pkg\lang" -Force
 
 Write-Host "=== done"

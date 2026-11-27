@@ -29,6 +29,9 @@ echo "==> overlay_ui"
 run src/util.c src/overlay_layer.c src/textinject.c src/overlay_ui.c -L "$LIBS" -lSDL2 -lSDL2_ttf -lm -o dist/bin/overlay_ui
 echo "==> fpshud"
 run src/util.c src/overlay_layer.c src/fpshud.c -L "$LIBS" -lSDL2 -lSDL2_ttf -lm -o dist/bin/fpshud
+echo "==> frame limiter shim"
+mkdir -p dist/lib
+run -shared -fPIC src/pace_shim.c -ldl -o dist/lib/liboverlyder_pace.so
 echo "==> vpad (test tool)"
 run tools/vpad.c -o dist/bin/vpad
 echo "done: dist/bin"

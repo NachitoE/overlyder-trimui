@@ -45,7 +45,9 @@ If you're on the device over SSH, run `sh install.sh` as root from the repo root
 
 ### Virtual keyboard
 
-Pick **Keyboard** in the panel and press <kbd>A</kbd>. The panel hides and the keyboard takes over. There are two modes, selected in the app's settings screen (**Keyboard mode**: Compact / Full) or with `keyboard_mode=` in `overlay.cfg`:
+Pick **Keyboard** in the panel and press <kbd>A</kbd>, or press the dedicated shortcut (currently **L2 + R2**) to open only the keyboard without showing the panel first. In that keyboard-only session, **B** (or Home / Start / OK) simply closes the keyboard and returns to the game — the panel is never shown. When the keyboard is opened from the panel, B still returns to the panel. The shortcut is remappable in the app's settings screen: choose **Keyboard shortcut** and press the button combination (B finishes; B alone disables it). **L2/R2 (LT/RT)** are supported as shortcut keys too (analog triggers pressed past halfway). It is stored as `kbd_trigger=` in `overlay.cfg`; `l2`/`lt` and `r2`/`rt` names are also accepted in that file.
+
+There are two keyboard modes, selected in the app's settings screen (**Keyboard mode**: Compact / Full) or with `keyboard_mode=` in `overlay.cfg`:
 
 - **Compact** (default): a small floating keyboard (720×248) that can be moved anywhere on screen with the **right stick** (clamped to the screen bounds). The game stays fully visible and characters go straight into the app — there is no input box.
 - **Full**: the original full-screen keyboard with a text field and a dimmed background.
@@ -58,6 +60,7 @@ Pick **Keyboard** in the panel and press <kbd>A</kbd>. The panel hides and the k
 | Shift / symbols | <kbd>Y</kbd> / <kbd>X</kbd> |
 | Backspace / confirm | <kbd>Select</kbd> / <kbd>Start</kbd> |
 | Move compact keyboard | right stick (left stick still moves the key cursor) |
+| Open keyboard directly | hold <kbd>Select</kbd> + <kbd>L1</kbd> (remappable) |
 
 Keys are injected through a virtual keyboard device created at daemon startup, so games can enumerate it like a physical keyboard. Going back always returns to the same overlay screen with the Keyboard row focused. In compact mode the typed text is still saved to `/tmp/overlyder.keyboard.txt` as a side channel.
 

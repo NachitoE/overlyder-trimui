@@ -118,6 +118,7 @@ int keycode_from_name(const char *name)
         { "select", K_SELECT }, { "start", K_START },
         { "a", K_A }, { "b", K_B }, { "x", K_X }, { "y", K_Y },
         { "l1", K_L1 }, { "r1", K_R1 }, { "l", K_L1 }, { "r", K_R1 },
+        { "l2", K_L2 }, { "r2", K_R2 }, { "lt", K_L2 }, { "rt", K_R2 },
     };
     if (!name || !*name)
         return -1;
@@ -223,6 +224,9 @@ void cfg_defaults(overlay_cfg *c)
     c->upd_reinstall = 0; /* never reinstall the same version unless asked */
     c->no_sigstop = 1;    /* draw on a hardware layer, leave the game running */
     c->keyboard_mode = 2; /* compact keyboard by default */
+    c->kbd_trigger[0] = K_SELECT;
+    c->kbd_trigger[1] = K_L1;
+    c->kbd_trigger_count = 2; /* SELECT + L1 opens the keyboard */
 }
 
 static void trim(char *s)
@@ -235,6 +239,22 @@ static void trim(char *s)
     size_t n = strlen(s);
     while (n && isspace((unsigned char)s[n - 1]))
         s[--n] = '\0';
+}
+
+/* Parse "code,code,..." (or key names) into a trigger array. */
+static int parse_trigger(char *v, int *out)
+{
+    int cnt = 0;
+    char *tok = strtok(v, ",+ ");
+    while (tok && cnt < 4) {
+        int code = keycode_from_name(tok);
+        if (code > 0)
+            out[cnt++] = code;
+        tok = strtok(NULL, ",+ ");
+    }
+    for (int i = cnt; i < 4; i++)
+        out[i] = 0;
+    return cnt;
 }
 
 int cfg_load(overlay_cfg *c)
@@ -261,20 +281,11 @@ int cfg_load(overlay_cfg *c)
             if (n >= 100 && n <= 5000)
                 c->hold_ms = n;
         } else if (!strcasecmp(k, "trigger") || !strcasecmp(k, "hotkey")) {
-            int cnt = 0;
-            char *tok = strtok(v, ",+ ");
-            while (tok && cnt < 4) {
-                int code = keycode_from_name(tok);
-                if (code > 0)
-                    c->trigger[cnt++] = code;
-                tok = strtok(NULL, ",+ ");
-            }
-            if (cnt > 0) {
+            int cnt = parse_trigger(v, c->trigger);
+            if (cnt > 0)
                 c->trigger_count = cnt;
-                /* clear unused slots */
-                for (int i = cnt; i < 4; i++)
-                    c->trigger[i] = 0;
-            }
+        } else if (!strcasecmp(k, "kbd_trigger") || !strcasecmp(k, "keyboard_hotkey")) {
+            c->kbd_trigger_count = parse_trigger(v, c->kbd_trigger);
         } else if (!strcasecmp(k, "dim")) {
             int n = atoi(v);
             if (n >= 0 && n <= 90)

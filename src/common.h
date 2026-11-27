@@ -67,6 +67,13 @@ void manifest_load(app_manifest *m);
 #define K_SELECT 314
 #define K_START  315
 #define K_MODE   316   /* Home / Menu */
+/* L2/R2 (LT/RT) are analog (EV_ABS ABS_Z / ABS_RZ, 0..255). Synthetic key
+ * codes let them share the trigger/mapping machinery; the daemon and UI map
+ * them from EV_ABS values >= 128. */
+#define K_L2     1001
+#define K_R2     1002
+#define K_LT     K_L2
+#define K_RT     K_R2
 
 typedef struct {
     int hold_ms;      /* long press threshold in ms */
@@ -81,6 +88,8 @@ typedef struct {
     int upd_reinstall;    /* 1 = allow reinstalling the installed version */
     int no_sigstop;       /* 1 = keep the game running, use a disp layer */
     int keyboard_mode;    /* 1 = full keyboard with input box, 2 = compact */
+    int kbd_trigger[4];   /* key codes that open the keyboard directly */
+    int kbd_trigger_count;/* 0 = shortcut disabled */
 } overlay_cfg;
 
 void cfg_defaults(overlay_cfg *c);

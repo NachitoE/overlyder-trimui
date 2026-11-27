@@ -122,6 +122,7 @@ static int g_stick_dir = 0;            /* last applied stick direction */
 /* Virtual keyboard state. The overlay panel stays behind it but is not drawn
  * while g_kb_open, so the keyboard behaves like a separate full-screen mode. */
 static int g_kb_open = 0;
+static int g_kb_only = 0;   /* opened via dedicated shortcut, no panel behind */
 static long g_kb_open_at = 0;
 static long g_kb_closed_at = 0;
 static char g_kb_text[128];
@@ -155,7 +156,7 @@ enum {
     CFG_ESTADO = 0, CFG_GATILLO,
     CFG_K1, CFG_K2, CFG_K3, CFG_K4,
     CFG_UMBRAL, CFG_CONFIRMAR, CFG_IDIOMA, CFG_SIGSTOP, CFG_KBMODE,
-    CFG_LEARN, CFG_RESET, CFG_ABOUT, CFG_UPDATE, CFG_LISTO, NCFG
+    CFG_KBHOTKEY, CFG_LEARN, CFG_RESET, CFG_ABOUT, CFG_UPDATE, CFG_LISTO, NCFG
 };
 
 #define PRESET_CUSTOM 6
@@ -187,6 +188,8 @@ static const struct { const char *name; int code; } g_keys[] = {
     { "Y",       K_Y },
     { "L1",      K_L1 },
     { "R1",      K_R1 },
+    { "L2 / LT", K_L2 },
+    { "R2 / RT", K_R2 },
 };
 #define NKEYS ((int)(sizeof g_keys / sizeof g_keys[0]))
 
@@ -200,6 +203,11 @@ static int g_cfg_hold = 1;
 static int g_cfg_confirm = 1;
 static int g_cfg_sigstop = 1;  /* 1 = hardware layer, 0 = SIGSTOP */
 static int g_cfg_kb_mode = 2;  /* 1 = full, 2 = compact */
+static int g_kb_custom[4];
+static int g_kb_custom_count = 0;
+static int g_kb_learning = 0;
+static unsigned int g_kb_learn_mask = 0;
+static long g_kb_learn_at = 0;
 static int g_custom[4] = { 1, 0, 0, 0 }; /* indices into g_keys */
 static int g_learning = 0;
 static int g_learn_mask = 0;
@@ -1427,6 +1435,18 @@ static void kb_close(void)
     g_dirty = 1;
 }
 
+/* Keyboard-only session (opened by the dedicated shortcut): B/Start close the
+ * keyboard and leave the overlay immediately, without drawing the panel. */
+static void kb_exit(void)
+{
+    text_save(g_kb_text);
+    g_kb_open = 0;
+    g_kb_only = 0;
+    g_exit_code = EXIT_CLOSE;
+    g_quit = 1;
+    g_dirty = 1;
+}
+
 static void kb_activate(void)
 {
     if (g_kb_row == KB_CTRL_ROW) {
@@ -1435,7 +1455,13 @@ static void kb_activate(void)
         case 1: g_kb_symbols = !g_kb_symbols; g_kb_col = 0; break;
         case 2: kb_type(' '); break;
         case 3: kb_backspace(); break;
-        case 4: kb_inject('\n'); kb_close(); break;
+        case 4:
+            kb_inject('\n');
+            if (g_kb_only)
+                kb_exit();
+            else
+                kb_close();
+            break;
         default: break;
         }
     } else {
@@ -1494,11 +1520,22 @@ static void kb_key(int code)
         return;
     switch (code) {
     case K_A:      kb_activate(); break;
-    case K_B:      /* back always returns to the overlay */
-    case K_MODE:   kb_close(); break;
+    case K_B:
+    case K_MODE:
+        if (g_kb_only)
+            kb_exit();
+        else
+            kb_close();
+        break;
     case K_Y:      g_kb_shift = !g_kb_shift; g_dirty = 1; break;
     case K_X:      g_kb_symbols = !g_kb_symbols; g_kb_col = 0; g_dirty = 1; break;
-    case K_START:  kb_inject('\n'); kb_close(); break;
+    case K_START:
+        kb_inject('\n');
+        if (g_kb_only)
+            kb_exit();
+        else
+            kb_close();
+        break;
     case K_SELECT: kb_backspace(); break;
     default: break;
     }
@@ -1771,6 +1808,10 @@ static void config_load(void)
     g_cfg_confirm = g_cfg.confirm_exit;
     g_cfg_sigstop = g_cfg.no_sigstop;
     g_cfg_kb_mode = g_cfg.keyboard_mode;
+    custom_from_codes(g_cfg.kbd_trigger, g_cfg.kbd_trigger_count);
+    for (int i = 0; i < 4; i++)
+        g_kb_custom[i] = g_custom[i];
+    g_kb_custom_count = g_cfg.kbd_trigger_count;
     g_cfg_preset = 0;
     int found = 0;
     for (int p = 0; p < NPRESETS; p++) {
@@ -1849,6 +1890,18 @@ static void config_save(void)
         fprintf(f, "confirm_exit=%d\n", g_cfg_confirm ? 1 : 0);
         fprintf(f, "no_sigstop=%d\n", g_cfg_sigstop ? 1 : 0);
         fprintf(f, "keyboard_mode=%d\n", g_cfg_kb_mode);
+        fprintf(f, "kbd_trigger=");
+        {
+            int n = 0;
+            for (int i = 0; i < 4 && i < g_kb_custom_count; i++) {
+                int code = g_keys[g_kb_custom[i]].code;
+                if (!code)
+                    continue;
+                fprintf(f, "%s%d", n ? "," : "", code);
+                n++;
+            }
+        }
+        fprintf(f, "\n");
         fprintf(f, "lang=%s\n", g_lang == LANG_EN ? "en" : (g_lang == LANG_PT ? "pt" : "es"));
         fprintf(f, "upd_reinstall=%d\n", g_cfg.upd_reinstall ? 1 : 0);
         if (g_cfg.led_color_set)
@@ -1894,6 +1947,20 @@ static void learn_finish(void)
     config_save();
 }
 
+/* Capture the dedicated keyboard shortcut. B with no keys disables it. */
+static void learn_finish_kb(void)
+{
+    int n = 0;
+    for (int i = 0; i < NKEYS && n < 4; i++) {
+        int code = g_keys[i].code;
+        if (code && (g_kb_learn_mask & (1u << (code & 31))))
+            g_kb_custom[n++] = i;
+    }
+    g_kb_custom_count = n;
+    g_kb_learning = 0;
+    config_save();
+}
+
 static void config_activate(void)
 {
     switch (g_cfg_sel) {
@@ -1916,6 +1983,11 @@ static void config_activate(void)
         break;
     case CFG_SIGSTOP:   g_cfg_sigstop = !g_cfg_sigstop; break;
     case CFG_KBMODE:    g_cfg_kb_mode = (g_cfg_kb_mode == 1) ? 2 : 1; break;
+    case CFG_KBHOTKEY:
+        g_kb_learning = 1;
+        g_kb_learn_mask = 0;
+        g_kb_learn_at = now_ms();
+        return; /* save only after the combination is captured */
     case CFG_LEARN:
         g_learning = 1;
         g_learn_mask = 0;
@@ -1930,6 +2002,9 @@ static void config_activate(void)
         g_cfg_enabled = 1;
         g_cfg_sigstop = g_cfg.no_sigstop; /* default = layer, no SIGSTOP */
         g_cfg_kb_mode = g_cfg.keyboard_mode; /* default = compact */
+        for (int i = 0; i < 4; i++)
+            g_kb_custom[i] = key_index_from_code(g_cfg.kbd_trigger[i]);
+        g_kb_custom_count = g_cfg.kbd_trigger_count;
         g_dim = g_cfg.dim;
         cfg_update_led_color(&g_cfg, 0xFFFFFF, 0);
         led_color_apply(0xFFFFFF);
@@ -1970,6 +2045,21 @@ static void config_compose(void)
         return;
     }
 
+    if (g_kb_learning) {
+        draw_text(TR(S_KB_HOTKEY_TITLE), SCR_W / 2, 150, g_f_mid, 0xF0F2F8, 1);
+        char names[256] = "";
+        for (int i = 0; i < NKEYS; i++) {
+            int code = g_keys[i].code;
+            if (code && (g_kb_learn_mask & (1u << (code & 31)))) {
+                if (*names)
+                    strcat(names, " + ");
+                strcat(names, key_name(i));
+            }
+        }
+        draw_text(*names ? names : "...", SCR_W / 2, 300, g_f_big, 0xE62037, 1);
+        return;
+    }
+
     if (g_learning) {
         draw_text(TR(S_LEARN_TITLE), SCR_W / 2, 150, g_f_mid, 0xF0F2F8, 1);
         char names[256] = "";
@@ -1997,6 +2087,7 @@ static void config_compose(void)
     snprintf(labels[CFG_IDIOMA], sizeof labels[0], "%s", TR(S_CFG_IDIOMA));
     snprintf(labels[CFG_SIGSTOP], sizeof labels[0], "%s", TR(S_CFG_SIGSTOP));
     snprintf(labels[CFG_KBMODE], sizeof labels[0], "%s", TR(S_CFG_KBMODE));
+    snprintf(labels[CFG_KBHOTKEY], sizeof labels[0], "%s", TR(S_CFG_KBHOTKEY));
     snprintf(labels[CFG_LEARN], sizeof labels[0], "%s", TR(S_LEARN));
     snprintf(labels[CFG_RESET], sizeof labels[0], "%s", TR(S_RESET));
     snprintf(labels[CFG_ABOUT], sizeof labels[0], "%s", TR(S_ABOUT));
@@ -2017,21 +2108,32 @@ static void config_compose(void)
              g_cfg_sigstop ? TR(S_NO) : TR(S_SI));
     snprintf(values[CFG_KBMODE], sizeof values[0], "%s",
              g_cfg_kb_mode == 1 ? TR(S_KB_FULL) : TR(S_KB_COMPACT));
+    if (g_kb_custom_count == 0) {
+        snprintf(values[CFG_KBHOTKEY], sizeof values[0], "%s", TR(S_NONE));
+    } else {
+        char combo[64] = "";
+        for (int i = 0; i < g_kb_custom_count; i++) {
+            if (*combo)
+                strcat(combo, "+");
+            strcat(combo, key_name(g_kb_custom[i]));
+        }
+        snprintf(values[CFG_KBHOTKEY], sizeof values[0], "%s", combo);
+    }
     values[CFG_LEARN][0] = '\0';
     values[CFG_RESET][0] = '\0';
     values[CFG_ABOUT][0] = '\0';
     snprintf(values[CFG_UPDATE], sizeof values[0], "v%s", g_manifest.version);
     values[CFG_LISTO][0] = '\0';
 
-    /* 15 rows now: keep them above the footer at y=684. */
-    int y0 = 142, row = 0;
+    /* 16 rows now: keep them above the footer at y=684. */
+    int y0 = 140, row = 0;
     for (int i = 0; i < NCFG; i++) {
         if (!cfg_visible(i))
             continue;
-        int y = y0 + row * 34;
+        int y = y0 + row * 32;
         row++;
         int focused = (i == g_cfg_sel);
-        fill_round_a(220, y, SCR_W - 440, 30, 10,
+        fill_round_a(220, y, SCR_W - 440, 28, 10,
                      focused ? 0xE62037 : 0x1A1B22, focused ? 255 : 235);
         draw_text(labels[i], 260, y + 1, g_f_mid, focused ? 0xFFFFFF : 0xBCBEC8, 0);
         draw_text(values[i], SCR_W - 260, y + 1, g_f_mid, focused ? 0xFFFFFF : 0xF0F2F8, 2);
@@ -2673,6 +2775,11 @@ int main(int argc, char **argv)
         /* assume the configured trigger keys are held while the overlay opens */
         for (int i = 0; i < g_cfg.trigger_count; i++)
             g_trigger_held |= 1 << (g_cfg.trigger[i] & 31);
+        const char *ok = getenv("OVERLAY_OPEN_KEYBOARD");
+        if (ok && atoi(ok)) {
+            g_kb_only = 1;
+            kb_open();  /* dedicated shortcut: open straight into keyboard */
+        }
     }
     while (!g_quit) {
         if (evfd >= 0) {
@@ -2746,6 +2853,18 @@ int main(int argc, char **argv)
                             if (e->code == K_A || e->code == K_B || e->code == K_MODE ||
                                 e->code == K_START || e->code == K_SELECT)
                                 g_about = 0;
+                        } else if (g_mode_cfg && g_kb_learning) {
+                            if (e->code == K_B) {
+                                learn_finish_kb();
+                            } else {
+                                for (int k = 0; k < NKEYS; k++) {
+                                    if (g_keys[k].code == e->code) {
+                                        g_kb_learn_mask |= 1u << (e->code & 31);
+                                        g_kb_learn_at = now_ms();
+                                        break;
+                                    }
+                                }
+                            }
                         } else if (g_mode_cfg && g_learning) {
                             if (e->code == K_B) {
                                 learn_finish();
@@ -2820,6 +2939,24 @@ int main(int argc, char **argv)
                     } else if (e->type == EV_ABS && e->code == ABS_RY) {
                         g_ry = e->value;
                         kb_move_panel();
+                    } else if (e->type == EV_ABS &&
+                               (e->code == ABS_Z || e->code == ABS_RZ)) {
+                        /* L2 / R2 (LT / RT) can be part of a mapped shortcut. */
+                        int acode = (e->code == ABS_Z) ? K_L2 : K_R2;
+                        if (e->value >= 128 && g_mode_cfg &&
+                            (g_kb_learning || g_learning)) {
+                            for (int k = 0; k < NKEYS; k++) {
+                                if (g_keys[k].code == acode) {
+                                    if (g_kb_learning)
+                                        g_kb_learn_mask |= 1u << (acode & 31);
+                                    else
+                                        g_learn_mask |= 1u << (acode & 31);
+                                    g_kb_learn_at = g_learn_at = now_ms();
+                                    break;
+                                }
+                            }
+                        }
+                        g_dirty = 1;
                     }
                 }
             }
@@ -2849,6 +2986,11 @@ int main(int argc, char **argv)
         }
         if (g_mode_cfg && g_learning && g_learn_mask && now - g_learn_at > 2500) {
             learn_finish();
+            g_dirty = 1;
+        }
+        if (g_mode_cfg && g_kb_learning && g_kb_learn_mask &&
+            now - g_kb_learn_at > 2500) {
+            learn_finish_kb();
             g_dirty = 1;
         }
         if (now - last_clock > 30000) {

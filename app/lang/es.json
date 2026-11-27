@@ -84,5 +84,7 @@
   "S_CFG_SIGSTOP": "SIGSTOP",
   "S_CFG_KBMODE": "Modo del teclado",
   "S_KB_FULL": "Completo",
-  "S_KB_COMPACT": "Compacto"
+  "S_KB_COMPACT": "Compacto",
+  "S_CFG_KBHOTKEY": "Atajo teclado",
+  "S_KB_HOTKEY_TITLE": "Pulsa los botones del atajo (B: listo)"
 }

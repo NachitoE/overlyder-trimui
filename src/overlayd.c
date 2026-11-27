@@ -374,7 +374,7 @@ static void ui_path(char *out, size_t outsz)
     snprintf(out, outsz, "/mnt/SDCARD/Apps/OverLyder/bin/overlay_ui");
 }
 
-static void run_overlay(int fd)
+static void run_overlay(int fd, int open_keyboard)
 {
     int use_layer = g_cfg.no_sigstop && getenv("OVERLAY_NO_LAYER") == NULL;
 
@@ -409,6 +409,7 @@ static void run_overlay(int fd)
         setenv("OVERLAY_HAS_GAME", g_has_game ? "1" : "0", 1);
         setenv("OVERLAY_CFG", CFG_PATH, 1);
         setenv("OVERLAY_NO_SIGSTOP", use_layer ? "1" : "0", 1);
+        setenv("OVERLAY_OPEN_KEYBOARD", open_keyboard ? "1" : "0", 1);
         execl(ui, "overlay_ui", (char *)NULL);
         logm("exec failed: %s", strerror(errno));
         _exit(EXIT_FAILED);
@@ -439,6 +440,45 @@ static void run_overlay(int fd)
         run_cmd("poweroff");
     } else {
         resume_targets();
+    }
+}
+
+/* Update both hotkey combos from one key press/release. `code` can be a
+ * normal EV_KEY code or a synthetic K_L2/K_R2 from an analog trigger. */
+static void update_combo(unsigned int code, int down,
+                         int full_mask, int kbd_mask,
+                         int *pressed, int *kbd_pressed,
+                         int *armed, int *kbd_armed,
+                         long *trig_at, long *kbd_trig_at)
+{
+    int bit = 1 << (code & 31);
+    if (full_mask & bit) {
+        if (down) {
+            if (!(*pressed & bit))
+                *pressed |= bit;
+            if (*armed && *pressed == full_mask)
+                *trig_at = now_ms();
+        } else {
+            *pressed &= ~bit;
+            if (*pressed == 0) {
+                *armed = 1;
+                *trig_at = 0;
+            }
+        }
+    }
+    if (kbd_mask & bit) {
+        if (down) {
+            if (!(*kbd_pressed & bit))
+                *kbd_pressed |= bit;
+            if (*kbd_armed && *kbd_pressed == kbd_mask)
+                *kbd_trig_at = now_ms();
+        } else {
+            *kbd_pressed &= ~bit;
+            if (*kbd_pressed == 0) {
+                *kbd_armed = 1;
+                *kbd_trig_at = 0;
+            }
+        }
     }
 }
 
@@ -534,13 +574,17 @@ int main(int argc, char **argv)
         goto out;
     }
 
-    int full_mask = 0;
+    int full_mask = 0, kbd_full_mask = 0;
     for (int i = 0; i < g_cfg.trigger_count; i++)
         full_mask |= 1 << (g_cfg.trigger[i] & 31);
+    for (int i = 0; i < g_cfg.kbd_trigger_count; i++)
+        kbd_full_mask |= 1 << (g_cfg.kbd_trigger[i] & 31);
+    logm("hotkeys: overlay=%d keys, keyboard=%d keys",
+         g_cfg.trigger_count, g_cfg.kbd_trigger_count);
 
-    int pressed_mask = 0;
-    long trig_at = 0;
-    int armed = 1;
+    int pressed_mask = 0, kbd_pressed_mask = 0;
+    long trig_at = 0, kbd_trig_at = 0;
+    int armed = 1, kbd_armed = 1;
     int in_overlay = 0;
 
     while (g_run) {
@@ -552,52 +596,60 @@ int main(int argc, char **argv)
             int cnt = (int)(rd / (ssize_t)sizeof(struct input_event));
             for (int i = 0; i < cnt; i++) {
                 struct input_event *e = &ev[i];
-                if (e->type != EV_KEY)
-                    continue;
-                int bit = 1 << (e->code & 31);
-                if (!(full_mask & bit))
-                    continue;
-                if (e->value == 1) {
-                    if (!(pressed_mask & bit))
-                        pressed_mask |= bit;
-                    if (armed && pressed_mask == full_mask)
-                        trig_at = now_ms();
-                } else if (e->value == 0) {
-                    pressed_mask &= ~bit;
-                    if (pressed_mask == 0) {
-                        armed = 1;
-                        trig_at = 0;
-                    }
+                if (e->type == EV_KEY) {
+                    update_combo((unsigned)e->code, e->value == 1,
+                                 full_mask, kbd_full_mask,
+                                 &pressed_mask, &kbd_pressed_mask,
+                                 &armed, &kbd_armed, &trig_at, &kbd_trig_at);
+                } else if (e->type == EV_ABS &&
+                           (e->code == ABS_Z || e->code == ABS_RZ)) {
+                    /* L2 / R2 (LT / RT) are analog triggers on this device. */
+                    unsigned code = (e->code == ABS_Z) ? K_L2 : K_R2;
+                    update_combo(code, e->value >= 128,
+                                 full_mask, kbd_full_mask,
+                                 &pressed_mask, &kbd_pressed_mask,
+                                 &armed, &kbd_armed, &trig_at, &kbd_trig_at);
                 }
             }
         }
 
-        if (!in_overlay && armed && trig_at && pressed_mask == full_mask &&
-            now_ms() - trig_at >= g_cfg.hold_ms) {
-            long held = now_ms() - trig_at;
-            (void)held;
+        /* Dedicated keyboard shortcut wins over the overlay hotkey. */
+        int open_kb = 0;
+        /* The keyboard shortcut is a button combo, not a long hold: fire as
+         * soon as all its keys are down. The overlay hotkey keeps hold_ms. */
+        if (kbd_full_mask && !in_overlay && kbd_armed &&
+            kbd_pressed_mask == kbd_full_mask) {
+            kbd_armed = 0;
+            kbd_trig_at = 0;
+            open_kb = 1;
+        } else if (!in_overlay && armed && trig_at && pressed_mask == full_mask &&
+                   now_ms() - trig_at >= g_cfg.hold_ms) {
             armed = 0;
             trig_at = 0;
+        }
+        if (open_kb || (!in_overlay && !armed && !trig_at)) {
             if (access(DISABLE_FLAG, F_OK) == 0) {
                 logm("hotkey pressed but overlay is disabled");
+                open_kb = 0;
+                armed = 1;
+                kbd_armed = 1;
                 continue;
             }
             in_overlay = 1;
-            run_overlay(fd);
+            run_overlay(fd, open_kb);
             in_overlay = 0;
 
-            /* The overlay grabs the input device, so the release of the key
-             * may never have reached this fd. Drain stale events and re-arm
-             * so one fresh long press always reopens the overlay. */
+            /* The overlay grabs the input device, so key releases may never
+             * reach this fd. Drain stale events and re-arm both combos. */
             usleep(100000);
             {
                 struct input_event junk[32];
                 while (read(fd, junk, sizeof junk) > 0)
                     ;
             }
-            pressed_mask = 0;
-            trig_at = 0;
-            armed = 1;
+            pressed_mask = kbd_pressed_mask = 0;
+            trig_at = kbd_trig_at = 0;
+            armed = kbd_armed = 1;
             if (g_run)
                 logm("ready again");
         }

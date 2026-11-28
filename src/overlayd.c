@@ -25,6 +25,35 @@ static void on_signal(int sig)
 /* input device                                                    */
 /* ---------------------------------------------------------------- */
 
+/* Name-only variant used at startup. CrossMix's button_state.sh (MENU+POWER
+ * force-exit) and thd (shortcuts) both hardcode /dev/input/event3 as the
+ * gamepad, so we must not create our uinput keyboard until the real gamepad
+ * has claimed its event node. The plain find_input_device() fallback to
+ * event3 is deliberately not used for this wait. */
+static int find_gamepad_device(char *out, size_t outsz)
+{
+    const char *env = getenv("OVERLAY_INPUT_DEV");
+    if (env && *env) {
+        snprintf(out, outsz, "%s", env);
+        return 0;
+    }
+    for (int i = 0; i < 40; i++) {
+        char path[64];
+        snprintf(path, sizeof path, "/dev/input/event%d", i);
+        int fd = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+        if (fd < 0)
+            continue;
+        char name[256] = { 0 };
+        int ok = ioctl(fd, EVIOCGNAME(sizeof name - 1), name) >= 0;
+        close(fd);
+        if (ok && (strstr(name, "TRIMUI") || strstr(name, "Player1"))) {
+            snprintf(out, outsz, "%s", path);
+            return 0;
+        }
+    }
+    return -1;
+}
+
 static int find_input_device(char *out, size_t outsz)
 {
     const char *env = getenv("OVERLAY_INPUT_DEV");
@@ -704,8 +733,30 @@ int main(int argc, char **argv)
     sigaction(SIGINT, &sa, NULL);
     sigaction(SIGHUP, &sa, NULL);
 
-    /* Create the virtual keyboard once, at daemon startup, so any game
-     * launched afterwards sees it when it enumerates input devices. The fd is
+    /* Wait for the real gamepad BEFORE creating the virtual keyboard. At boot
+     * overlayd starts before trimui_inputd; creating the uinput keyboard first
+     * makes it claim /dev/input/event3, pushing TRIMUI Player1 to event4. The
+     * firmware then queries the wrong node for MENU and MENU+POWER shuts the
+     * device down instead of force-closing the game. */
+    char dev[64];
+    int waited = 0;
+    while (find_gamepad_device(dev, sizeof dev) < 0) {
+        if (!g_run)
+            goto out;
+        usleep(500000);
+        if (++waited > 40) {
+            if (find_input_device(dev, sizeof dev) < 0) {
+                logm("input device not found, aborting");
+                goto out;
+            }
+            logm("gamepad not found by name; using fallback %s", dev);
+            break;
+        }
+    }
+    logm("using input device %s", dev);
+
+    /* Created after the gamepad exists, so it cannot steal its event node.
+     * Games launched afterwards still enumerate the keyboard. The fd is
      * inherited by overlay_ui via OVERLAY_KBD_FD. */
     int kbd_fd = keyboard_device_open();
     if (kbd_fd >= 0) {
@@ -713,19 +764,6 @@ int main(int argc, char **argv)
         snprintf(b, sizeof b, "%d", kbd_fd);
         setenv("OVERLAY_KBD_FD", b, 1);
     }
-
-    char dev[64];
-    int waited = 0;
-    while (find_input_device(dev, sizeof dev) < 0) {
-        if (!g_run)
-            goto out;
-        usleep(500000);
-        if (++waited > 120) {
-            logm("input device not found, aborting");
-            goto out;
-        }
-    }
-    logm("using input device %s", dev);
 
     /* Restore the saved fixed color after the firmware has finished starting
      * (waiting for the input device gives it time). Skipped when no color was

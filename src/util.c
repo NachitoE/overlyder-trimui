@@ -308,6 +308,8 @@ int cfg_load(overlay_cfg *c)
                 c->lang = 1;
             else if (!strcasecmp(v, "pt") || !strcmp(v, "2"))
                 c->lang = 2;
+            else if (!strcasecmp(v, "ru") || !strcmp(v, "3"))
+                c->lang = 3;
             else if (!strcasecmp(v, "es") || !strcmp(v, "0"))
                 c->lang = 0;
         } else if (!strcasecmp(k, "upd_reinstall")) {

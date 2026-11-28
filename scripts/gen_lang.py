@@ -3,7 +3,7 @@
 
 app/lang/keys.json is the canonical list of keys. This script:
   1. generates src/lang_keys.h  (S_* enum + g_tr_keys[] used by overlay_ui.c)
-  2. makes sure app/lang/{es,en,pt}.json contain every key (keeps existing
+  2. makes sure app/lang/{es,en,pt,ru}.json contain every key (keeps existing
      translations, adds missing ones as empty strings)
 
 Run after editing keys.json:
@@ -17,7 +17,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LANG = os.path.join(ROOT, 'app', 'lang')
 KEYS_FILE = os.path.join(LANG, 'keys.json')
 HEADER = os.path.join(ROOT, 'src', 'lang_keys.h')
-LANGS = ('es', 'en', 'pt')
+LANGS = ('es', 'en', 'pt', 'ru')
 
 
 def main():

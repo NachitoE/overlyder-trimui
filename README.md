@@ -25,7 +25,7 @@ Hold the Home button (or a combo you choose) and a Switch-style overlay slides o
 - Mute, quit the game, reboot and shut down
 - Virtual keyboard: opens from the overlay, sends real key presses to the app underneath and returns to the panel with B/Home
 - No patches or setup inside the game
-- Trigger, hold time, language (Spanish, English, Portuguese, from JSON files) and the SIGSTOP/layer mode set from the app
+- Trigger, hold time, language (Spanish, English, Portuguese, Russian, from JSON files) and the SIGSTOP/layer mode set from the app
 - Optional persistent, read-only FPS counter: FPS, frametime, CPU/GPU usage, temperatures and frequencies in any corner (simple text or window), configured from the overlay
 - Optional global frame limiter (5–60 fps in steps of 5, or no cap) for emulators and ports, hidden behind an experimental toggle in the app; no game files or clocks are changed
 - Built-in updater in the app: shows the installed version and checks GitHub releases for a newer one
@@ -120,7 +120,7 @@ You can tweak the trigger and timing from the app.
 ## Languages
 
 All UI strings are flat JSON files in `app/lang/` (`es.json`, `en.json`,
-`pt.json`), installed to `Apps/OverLyder/lang/`. See
+`pt.json`, `ru.json`), installed to `Apps/OverLyder/lang/`. See
 [docs/LANGUAGES.md](docs/LANGUAGES.md) for the format, loading order, fallback
 and how to add a language.
 

@@ -22,7 +22,7 @@ for f in "$SRC/dist/bin/overlayd" "$SRC/dist/bin/overlay_ui" "$SRC/dist/bin/fpsh
          "$SRC/app/overlayctl" "$SRC/app/overLyder.start" "$SRC/app/updater.sh" \
          "$SRC/app/resources/MaterialIcons-Regular.ttf" \
          "$SRC/app/resources/LICENSE-MaterialIcons.txt" \
-         "$SRC/app/lang/es.json" "$SRC/app/lang/en.json" "$SRC/app/lang/pt.json"; do
+         "$SRC/app/lang/es.json" "$SRC/app/lang/en.json" "$SRC/app/lang/pt.json" "$SRC/app/lang/ru.json"; do
     if [ ! -f "$f" ]; then
         echo "Missing file: $f"
         exit 1

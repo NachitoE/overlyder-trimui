@@ -105,7 +105,7 @@ typedef struct {
     int dim;          /* background dim 0..100 */
     int step;         /* default percent step */
     int confirm_exit; /* 1 = ask before exit/reboot/poweroff */
-    int lang;         /* 0 = Spanish, 1 = English, 2 = Portuguese */
+    int lang;         /* 0 = Spanish, 1 = English, 2 = Portuguese, 3 = Russian */
     uint32_t led_color;   /* 0xRRGGBB static LED color */
     int led_color_set;    /* 1 = a color was configured */
     int upd_reinstall;    /* 1 = allow reinstalling the installed version */

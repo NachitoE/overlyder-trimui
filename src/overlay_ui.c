@@ -278,7 +278,7 @@ static void upd_install(void);
 /* translations (selector lives in the CrossMix config app)           */
 /* ------------------------------------------------------------------ */
 
-enum { LANG_ES = 0, LANG_EN, LANG_PT, NLANG };
+enum { LANG_ES = 0, LANG_EN, LANG_PT, LANG_RU, NLANG };
 static int g_lang = LANG_ES;
 
 /* Language keys and the S_* enum are generated from app/lang/keys.json.
@@ -287,9 +287,9 @@ static int g_lang = LANG_ES;
 static char g_tr_values[S_COUNT][256];
 
 #define TR(id) (g_tr_values[(id)][0] ? g_tr_values[(id)] : g_tr_keys[(id)])
-#define LANG_NAME(l) (l == LANG_EN ? "English" : (l == LANG_PT ? "Português" : "Español"))
+#define LANG_NAME(l) (l == LANG_EN ? "English" : (l == LANG_PT ? "Português" : (l == LANG_RU ? "Русский" : "Español")))
 
-static const char *const g_lang_codes[NLANG] = { "es", "en", "pt" };
+static const char *const g_lang_codes[NLANG] = { "es", "en", "pt", "ru" };
 
 /* Load app/lang/<code>.json. Values missing from the file fall back to the
  * key name so the UI never renders blank labels. OVERLAY_LANG_DIR can point
@@ -2001,7 +2001,7 @@ static void config_save(void)
             }
         }
         fprintf(f, "\n");
-        fprintf(f, "lang=%s\n", g_lang == LANG_EN ? "en" : (g_lang == LANG_PT ? "pt" : "es"));
+        fprintf(f, "lang=%s\n", g_lang == LANG_EN ? "en" : (g_lang == LANG_PT ? "pt" : (g_lang == LANG_RU ? "ru" : "es")));
         fprintf(f, "upd_reinstall=%d\n", g_cfg.upd_reinstall ? 1 : 0);
         if (g_cfg.led_color_set)
             fprintf(f, "ledcolor=%06X\n", g_cfg.led_color);

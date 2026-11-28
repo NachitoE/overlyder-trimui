@@ -7,6 +7,7 @@ All user-facing strings live in **flat JSON files**, one per language, inside
 app/lang/es.json    Spanish
 app/lang/en.json    English
 app/lang/pt.json    Portuguese
+app/lang/ru.json    Russian
 ```
 
 There is a **single source of truth for the keys**:
@@ -23,7 +24,7 @@ Whenever `keys.json` changes, run:
 python scripts/gen_lang.py
 ```
 
-This regenerates `src/lang_keys.h` and adds/removes keys in all three language
+This regenerates `src/lang_keys.h` and adds/removes keys in all four language
 files (existing translations are preserved; new keys start as empty strings —
 fill them in afterwards).
 
@@ -31,7 +32,7 @@ fill them in afterwards).
 
 Each file is a single flat object: `"S_KEY": "translated text"`. Keys match the
 entries in `app/lang/keys.json` exactly. To add a string, add its key there,
-run `scripts/gen_lang.py`, then fill the new value in the three files.
+run `scripts/gen_lang.py`, then fill the new value in the four files.
 
 Example (`app/lang/en.json`):
 
@@ -58,7 +59,7 @@ file in this order:
 2. `<directory of overlay_ui>/../lang/<code>.json`,
 3. `/mnt/SDCARD/Apps/OverLyder/lang/<code>.json`.
 
-`<code>` is `es`, `en` or `pt`. The result is logged to `/tmp/overlayd.log` as
+`<code>` is `es`, `en`, `pt` or `ru`. The result is logged to `/tmp/overlayd.log` as
 `language en: 83/83 strings from …`.
 
 If the file is missing or a key is absent, Fallback is the **key name** itself
@@ -67,13 +68,13 @@ app still works without the lang folder, but with untranslated key names.
 
 Changing **Idioma** in the app's settings screen calls `lang_load()` again
 immediately, so the whole UI switches language without restarting. The option
-is written as `lang=es|en|pt` in `overlay.cfg` when settings are saved.
+is written as `lang=es|en|pt|ru` in `overlay.cfg` when settings are saved.
 
 ## Adding a new language
 
 1. Add the new key to `app/lang/keys.json` (the central list).
 2. Run `python scripts/gen_lang.py` — this regenerates `src/lang_keys.h` and
-   adds the key to `es/en/pt.json`.
+   adds the key to `es/en/pt/ru.json`.
 3. Fill the translated value in each `app/lang/<code>.json`.
 4. For a whole new language: add a `LANG_*` enum value, bump `NLANG`, append
    its code to `g_lang_codes[]` and `LANG_NAME()` in `src/overlay_ui.c`, accept
